@@ -102,10 +102,15 @@ Read the licence rather than this summary — the licence is what binds.
 
 ## Contributing
 
-**Not open for contributions yet.** The contributor agreement model (DCO or
-CLA) has not been decided, and accepting code before deciding would make it
-impossible to fix later. Issues and discussion are welcome; pull requests will
-be closed unread until this section changes.
+There is no product code to send a pull request against yet. Issues and
+discussion are open.
+
+The contributor agreement is already decided, because deciding it after the
+first contribution arrives does not work: LEDAR uses the **Developer
+Certificate of Origin**, not a CLA. You keep your copyright, and your
+contribution can never be moved into a closed commercial tier — see
+[`CONTRIBUTING.md`](CONTRIBUTING.md) for what that rules out and why the
+option was given up deliberately.
 
 ---
 

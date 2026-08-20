@@ -11,16 +11,17 @@ Licensor:             Ngo Trung
 
 Licensed Work:        LEDAR
                       Everything in this repository that does not carry a
-                      licence of its own. Packages under packages/ and apps/
-                      that ship independently keep their own copy of their
-                      licence because they are distributed as packages in
-                      their own right.
+                      licence of its own. A package that ships independently
+                      carries its own licence file and is governed by that
+                      licence, not by this one.
                       The Licensed Work is (c) 2026 Ngo Trung
 
 Additional Use Grant: You may use, run and modify the Licensed Work for any
-                      purpose, including inside a commercial organisation and
-                      as part of paid work, and you may distribute it
-                      unmodified as a dependency of your own tooling.
+                      purpose, including inside a commercial organisation, as
+                      part of paid work, and to inspect systems belonging to
+                      your own clients as part of services you provide to
+                      them, and you may distribute it unmodified as a
+                      dependency of your own tooling.
 
                       You may not make the Licensed Work, or a work derived
                       from it, available to third parties as a commercial
