@@ -35,11 +35,23 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # The floor from package.json engines, and current. N14 in the private
-        # ledger is the debt this closes half of: until now every test in this
-        # project had only ever run on Windows, so `spawn(..., { shell: true })`
-        # had never executed on POSIX even once.
-        node: ['20', '22']
+        # 22 is the real floor, and CI is what established that. The first
+        # run of this workflow used ['20', '22']; on Node 20 `npm test` exited
+        # 0 having run ZERO tests, because the test runner there cannot expand
+        # the glob patterns the script passes:
+        #
+        #     Could not find '.../packages/*/test/**/*.test.ts'
+        #
+        # A green step that measured nothing. The skip-count check below caught
+        # it only because it could find no summary to read and treats that as a
+        # failure rather than as permission to assume. `engines` claimed >=20
+        # until then; it says >=22 now, because that is what was measured.
+        #
+        # N14 in the private ledger is the debt this half-closes: before this
+        # workflow every test in the project had only ever run on Windows, so
+        # `spawn(..., { shell: true })` had never once executed on POSIX. It
+        # does now, and the counts match Windows exactly.
+        node: ['22', '24']
 
     steps:
       - uses: actions/checkout@v4
