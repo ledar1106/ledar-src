@@ -1,0 +1,106 @@
+# Light CI. No secrets, no database, no deploy.
+#
+# This workflow runs in both repositories, and the public one is why it is
+# shaped the way it is: a pull request from a fork can run a workflow, so any
+# secret reachable from here is a secret everyone has. There are none, and
+# there is nothing here to add one to.
+#
+# ## The skip count is asserted, and that is the point
+#
+# Seven suites need the Pagila fixture container described in the private
+# repository. It does not exist here, so they skip — cleanly, each printing
+# the reason. That leaves 316 tests that need nothing but Node.
+#
+# A skip is not a pass. This repository's regression gate requires `0 skip`,
+# and softening that to "skips are fine on CI" is how a suite quietly stops
+# proving anything: one more suite starts skipping, the count moves from 7 to
+# 8, and nobody sees it because the job was already green with skips in it.
+#
+# So the number is pinned. Adding a test that needs a database means changing
+# EXPECTED_SKIPS in the same commit, which puts it in the diff where a reviewer
+# reads it. Deleting one does too.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The floor from package.json engines, and current. N14 in the private
+        # ledger is the debt this closes half of: until now every test in this
+        # project had only ever run on Windows, so `spawn(..., { shell: true })`
+        # had never executed on POSIX even once.
+        node: ['20', '22']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - run: npm ci
+
+      # Type-checks the sources AND the test files. `tsconfig.test.json` exists
+      # because package tsconfigs only include `src/**`, so before it the
+      # assertions were transpiled and never checked — a wrong property name in
+      # an assertion reached the runner as a TypeError instead of a build error.
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test 2>&1 | tee test-output.txt
+
+      - name: Check that only the database-backed suites skipped
+        shell: bash
+        run: |
+          EXPECTED_SKIPS=7
+          skipped=$(grep -oE '^. skipped [0-9]+' test-output.txt | grep -oE '[0-9]+$' | tail -1)
+          failed=$(grep -oE '^. fail [0-9]+' test-output.txt | grep -oE '[0-9]+$' | tail -1)
+
+          echo "fail=${failed:-unknown}  skipped=${skipped:-unknown}  expected skips=$EXPECTED_SKIPS"
+
+          if [ -z "$failed" ] || [ -z "$skipped" ]; then
+            echo "::error::Could not read the test summary. The runner's output format changed;"
+            echo "::error::treating that as a failure rather than assuming everything passed."
+            exit 1
+          fi
+          if [ "$failed" -ne 0 ]; then
+            echo "::error::$failed test(s) failed."
+            exit 1
+          fi
+          if [ "$skipped" -ne "$EXPECTED_SKIPS" ]; then
+            echo "::error::$skipped suite(s) skipped; exactly $EXPECTED_SKIPS should."
+            echo "::error::The seven that skip here need the Pagila fixture container, which"
+            echo "::error::this repository does not have. A different number means either a"
+            echo "::error::suite that used to run has stopped, or a database-backed test was"
+            echo "::error::added without updating EXPECTED_SKIPS in this workflow."
+            grep -iE 'skip' test-output.txt | head -40
+            exit 1
+          fi
+
+      - name: Say what was not covered
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### What this run did NOT cover"
+            echo
+            echo "Seven suites need a Postgres fixture container that exists only in the"
+            echo "private repository. Everything they prove — the connector's scope report,"
+            echo "both rule packs against deliberately damaged tables, the redaction chain,"
+            echo "and the three CLI commands end to end — is unproven by this job."
+            echo
+            echo "Green here means the code builds, type-checks, and the 316 tests that need"
+            echo "no database pass on Node ${{ matrix.node }}."
+          } >> "$GITHUB_STEP_SUMMARY"

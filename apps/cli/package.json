@@ -1,0 +1,14 @@
+{
+  "name": "@ledar/cli",
+  "version": "0.0.0",
+  "description": "Command line entry point for LEDAR scans.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "dependencies": {
+    "@ledar/connector-postgres": "*",
+    "@ledar/contracts": "*",
+    "@ledar/packs-layer-a": "*",
+    "@ledar/packs-layer-b": "*",
+    "@ledar/store": "*"
+  }
+}

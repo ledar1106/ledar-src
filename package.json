@@ -1,0 +1,32 @@
+{
+  "name": "ledar",
+  "version": "0.0.0",
+  "private": true,
+  "description": "An AI employee that reads your database and explains what it finds.",
+  "license": "BUSL-1.1",
+  "author": "Ngo Trung",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "typecheck": "tsc --build && tsc -p tsconfig.test.json",
+    "check:db": "tsx packages/connector-postgres/src/cli.ts",
+    "scan": "tsx apps/cli/src/scan.ts",
+    "diff": "tsx apps/cli/src/diff.ts",
+    "export:evidence": "tsx apps/cli/src/export-evidence.ts",
+    "test": "tsx --test \"packages/*/test/**/*.test.ts\" \"apps/*/test/**/*.test.ts\"",
+    "test:offline": "tsx --test \"packages/contracts/test/**/*.test.ts\" \"packages/store/test/**/*.test.ts\" \"packages/packs-layer-b/test/semantic-question.test.ts\""
+  },
+  "devDependencies": {
+    "@ledar/test-fixtures": "*",
+    "@types/node": "^22.10.2",
+    "@types/pg": "^8.11.10",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

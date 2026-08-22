@@ -1,0 +1,13 @@
+{
+  "name": "@ledar/packs-layer-a",
+  "version": "0.0.0",
+  "description": "Declared constraints the database is not actually enforcing.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "dependencies": {
+    "@ledar/connector-postgres": "*",
+    "@ledar/contracts": "*",
+    "pg": "^8.13.1"
+  }
+}

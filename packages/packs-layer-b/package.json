@@ -1,0 +1,13 @@
+{
+  "name": "@ledar/packs-layer-b",
+  "version": "0.0.0",
+  "description": "Patterns that look like rules nobody declared. Questions, not verdicts.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "dependencies": {
+    "@ledar/connector-postgres": "*",
+    "@ledar/contracts": "*",
+    "pg": "^8.13.1"
+  }
+}

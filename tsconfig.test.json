@@ -1,0 +1,21 @@
+// Type-checks the test suites, which `tsconfig.json` does not.
+//
+// Every package tsconfig has `include: ["src/**/*.ts"]`, so until this file
+// existed the test files were transpiled by tsx and never checked. A wrong
+// property name in an assertion — `back[0].coverage` where the value is
+// `back[0].finding.coverage` — reached the test runner as a TypeError at run
+// time instead of an error at build time, and only in whichever branch of the
+// test happened to execute. Assertions that are never checked are how a suite
+// comes to be green about something it is not actually reading.
+//
+// `noEmit`, so this produces nothing: `tsc --build` still owns the output.
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "composite": false,
+    "declaration": false,
+    "sourceMap": false,
+    "noEmit": true
+  },
+  "include": ["packages/*/test/**/*.ts", "apps/*/test/**/*.ts"]
+}

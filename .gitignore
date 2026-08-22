@@ -1,0 +1,39 @@
+# .gitignore for the PUBLIC repository (ledar-src).
+#
+# Published from the private repo as `.gitignore`. It is deliberately not a
+# copy of the private one: that file lists things this repository has no
+# concept of — infrastructure, agent configuration, field measurements — and
+# a gitignore is a description of what a working tree contains.
+#
+# This file exists because of a near miss. Until product code shipped here
+# nobody had ever run `npm ci` in this repository, so there was no
+# `node_modules/` and no gitignore to notice was missing. The last instruction
+# the publish script prints is `git add -A`.
+
+# --- dependencies -----------------------------------------------------
+node_modules/
+
+# --- build output -----------------------------------------------------
+# Every package emits both. They are also blocked on the way out by the
+# publish gate, so this is the second of two fences rather than the only one.
+dist/
+build/
+out/
+*.tsbuildinfo
+
+# --- editor / OS ------------------------------------------------------
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# --- never, under any circumstances ------------------------------------
+# Nothing here should ever be able to reach this repository: it is published
+# by an allowlist, and none of these are on it. Listed anyway, because a
+# contributor works in this tree directly and the allowlist does not protect
+# what they create locally.
+.env
+.env.*
+!.env.example
+*.key
+*.pem

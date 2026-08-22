@@ -1,0 +1,11 @@
+{
+  "name": "@ledar/contracts",
+  "version": "0.0.0",
+  "description": "Shared shapes for LEDAR findings, scope and coverage.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "dependencies": {
+    "zod": "^3.24.1"
+  }
+}

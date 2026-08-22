@@ -1,0 +1,26 @@
+{
+  "files": [],
+  "references": [
+    {
+      "path": "packages/contracts"
+    },
+    {
+      "path": "packages/connector-postgres"
+    },
+    {
+      "path": "packages/packs-layer-a"
+    },
+    {
+      "path": "packages/packs-layer-b"
+    },
+    {
+      "path": "packages/test-fixtures"
+    },
+    {
+      "path": "packages/store"
+    },
+    {
+      "path": "apps/cli"
+    }
+  ]
+}

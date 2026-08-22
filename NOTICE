@@ -1,0 +1,61 @@
+LEDAR
+Copyright (c) 2026 Ngo Trung
+
+This repository is licensed under two different licences, and which one applies
+depends on where a file sits. The rule comes from the Licensed Work definition
+in LICENSE: everything is BSL 1.1 EXCEPT a package that carries a licence file
+of its own, which is governed by that file instead.
+
+A missing per-package LICENSE file therefore does not mean "unlicensed". It
+means BSL 1.1. That direction is deliberate — it fails closed.
+
+-----------------------------------------------------------------------------
+Apache License 2.0 — the parts that touch your database
+-----------------------------------------------------------------------------
+
+Each of these directories contains its own LICENSE file (Apache 2.0), and that
+file, not the repository root LICENSE, governs it:
+
+    packages/contracts            claim shapes, sealing rules, Evidence Pack
+    packages/connector-postgres   the read-only Postgres connection and scope
+    packages/packs-layer-a        detection rules read from the catalogue
+    packages/packs-layer-b        detection rules read by sampling data
+    packages/store                the local scan history and the diff
+    packages/test-fixtures        test-only helpers; never published to npm
+    apps/cli                      the command-line entry points
+
+They are Apache 2.0 for two reasons, and the second is not a courtesy.
+
+First, this product reads production databases. Anything that touches customer
+data has to be auditable by the people whose data it is, so the connector, the
+query templates, the redaction path and the detection rules can never move to a
+closed tier — no matter what else does.
+
+Second, the BSL Additional Use Grant permits redistribution of the Licensed
+Work only *unmodified*. Under that constraint a contributor could not write a
+new connector or a new rule pack without immediately falling outside the grant.
+Putting those packages under Apache 2.0 is what makes outside contribution
+possible at all.
+
+-----------------------------------------------------------------------------
+Business Source License 1.1 — everything else
+-----------------------------------------------------------------------------
+
+Everything in this repository that is not listed above. See LICENSE for the
+parameters, and CHANGE-DATE-LEDGER.md for the Change Date of each released
+version. The BSL applies separately to each version, so there is one ledger row
+per version rather than one date for the project.
+
+-----------------------------------------------------------------------------
+What is not here
+-----------------------------------------------------------------------------
+
+This is the public source repository. It is published from a private one by an
+allowlist, so it holds the product and nothing else: no strategy documents, no
+field measurements, no infrastructure or credentials, no internal notes. Files
+absent from this repository are absent on purpose and are not missing.
+
+The published history is a sequence of synthesised commits rather than a mirror
+of the private one. A secret that had ever touched the private history would
+become permanent public history the moment the two were joined, and a public
+repository cannot be recalled once it has been cloned.

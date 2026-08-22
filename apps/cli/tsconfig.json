@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "rootDir": "src", "outDir": "dist" },
+  "include": ["src/**/*.ts"],
+  "references": [
+    { "path": "../../packages/contracts" },
+    { "path": "../../packages/connector-postgres" },
+    { "path": "../../packages/packs-layer-a" },
+    { "path": "../../packages/packs-layer-b" },
+    { "path": "../../packages/store" }
+  ]
+}

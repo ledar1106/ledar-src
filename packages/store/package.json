@@ -1,0 +1,17 @@
+{
+  "name": "@ledar/store",
+  "version": "0.0.0",
+  "description": "Local SQLite history of scan runs, so a second scan can be compared with the first.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "test": "tsx --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@ledar/contracts": "*"
+  }
+}
