@@ -63,6 +63,19 @@ jobs:
 
       - run: npm ci
 
+      # HS-A A.6. Runs in BOTH repositories, unconditionally, and that is the
+      # reason `infra/check-secrets.py` and `infra/secret_patterns.py` are the
+      # only two files under infra/ that publish.
+      #
+      # The alternative was `if [ -f infra/check-secrets.py ]` — a security
+      # check that skips itself when a file is missing is a security check
+      # that will one day skip itself for a reason nobody notices. Neither
+      # file holds a secret or an access grant, which is what the infra/
+      # boundary is actually protecting; publishing them costs nothing and
+      # buys the same gate on every contributor's pull request.
+      - name: Secret scan
+        run: python infra/check-secrets.py
+
       # Type-checks the sources AND the test files. `tsconfig.test.json` exists
       # because package tsconfigs only include `src/**`, so before it the
       # assertions were transpiled and never checked — a wrong property name in
