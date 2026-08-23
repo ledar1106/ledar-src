@@ -1,4 +1,4 @@
-"""Cac chuoi giong secret — MOT ban duy nhat, hai noi dung.
+"""Cac chuoi giong secret, VA cai gi khong phai secret — mot ban, hai noi dung.
 
 `publish-public.py` dung de chan luc day sang repo cong khai.
 `check-secrets.py` dung de chan luc commit.
@@ -32,3 +32,48 @@ TEXT_EXT = {
     ".yml", ".yaml", ".toml", ".sql", ".sh", ".ps1", ".cmd", ".py", ".css",
     ".html", ".env", ".ini", ".cfg", ".lock", "",
 }
+
+
+# ---------------------------------------------------------------------------
+# Cai gi KHONG phai secret du khop pattern o tren
+# ---------------------------------------------------------------------------
+#
+# Phan nay tung chi co o `check-secrets.py`, va do la mot loi: hai cong cung
+# doc SECRET_PATTERNS nhung chi mot cong biet ve ngoai le, nen chung tra loi
+# KHAC NHAU cho cung mot dong. `check-secrets.py` cho qua DSN fixture;
+# `publish-public.py` chan no. Hai cong, mot cau hoi, hai cau tra loi.
+#
+# Chua can no truoc day chi vi chua file nao ĐƯỢC ĐẨY chua DSN fixture nguyen
+# ven — `pagila.ts` ghep chuoi luc chay. Ngay dau tien mot file nhu vay di ra
+# public, chenh lech lo ra.
+
+import re
+
+# Mat khau cua container fixture: mot container vut di chi chua du lieu public,
+# ghi ro trong HANDOFF-STATUS 1b la khong phai secret.
+#
+# Ngoai le khoa vao GIA TRI, khong khoa vao file hay dong:
+#   - them file moi dung dung DSN ay        -> van qua
+#   - dan mot DSN that vao BAT KY dau       -> truot ngay
+#   - doi mat khau fixture                  -> hang so nay phai doi theo
+FIXTURE_PASSWORD = "fixture_no_real_data"
+
+# Mot "mat khau" la placeholder thi theo dinh nghia khong chua secret nao.
+PLACEHOLDER = re.compile(
+    r"^(\$\{[^}]*\}|\$[A-Za-z_][A-Za-z0-9_]*|%[^%]*%|<[^>]*>|\.\.\.|xxx+|\*+)$"
+)
+
+# Bat mat khau ra khoi mot DSN, de hoi xem no co phai mot trong hai thu tren.
+DSN = re.compile(r"\bpostgres(?:ql)?://[^\s:@/]+:([^\s@/]+)@")
+
+
+def line_is_allowed(line):
+    """True khi dong nay khop pattern nhung khong chua secret nao."""
+    passwords = DSN.findall(line)
+    if not passwords:
+        return False
+    # `all`, khong phai `any`: mot dong co ca DSN fixture LAN mot DSN that thi
+    # phai truot.
+    return all(
+        p == FIXTURE_PASSWORD or PLACEHOLDER.match(p) is not None for p in passwords
+    )

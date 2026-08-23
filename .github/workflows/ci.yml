@@ -5,20 +5,22 @@
 # secret reachable from here is a secret everyone has. There are none, and
 # there is nothing here to add one to.
 #
-# ## The skip count is asserted, and that is the point
+# ## Zero skips, because the fixture is built here now
 #
-# Seven suites need the Pagila fixture container described in the private
-# repository. It does not exist here, so they skip — cleanly, each printing
-# the reason. That leaves 316 tests that need nothing but Node.
+# Seven suites need a Postgres holding Pagila plus fourteen deliberate faults —
+# the connector's scope report, both rule packs against the damaged tables, the
+# redaction chain, and the three CLI commands end to end. Until this workflow
+# built one, they skipped, and a CI that runs everything except the parts that
+# touch a database is a CI that never checks the product.
 #
-# A skip is not a pass. This repository's regression gate requires `0 skip`,
-# and softening that to "skips are fine on CI" is how a suite quietly stops
-# proving anything: one more suite starts skipping, the count moves from 7 to
-# 8, and nobody sees it because the job was already green with skips in it.
+# A skip is not a pass. The count is still asserted rather than tolerated, and
+# it is asserted at ZERO. Softening that to "skips are fine on CI" is how a
+# suite quietly stops proving anything: one starts skipping, nobody sees it
+# because the job was already green with skips in it.
 #
-# So the number is pinned. Adding a test that needs a database means changing
-# EXPECTED_SKIPS in the same commit, which puts it in the diff where a reviewer
-# reads it. Deleting one does too.
+# So the number stays pinned. A test that starts skipping fails the build, and
+# a database-backed test that has to skip means changing EXPECTED_SKIPS in the
+# same commit, where a reviewer reads it.
 name: CI
 
 on:
@@ -32,6 +34,28 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+
+    services:
+      # pgvector rather than the plain image: Pagila declares
+      # `film_embedding.embedding vector(20)`, so the schema will not load
+      # without the extension. Postgres 18 is also not optional — Pagila uses
+      # `uuidv7()` and VIRTUAL columns, which 17 cannot parse.
+      #
+      # The password belongs to a container that exists for the length of one
+      # job and holds nothing but a public sample database.
+      postgres:
+        image: pgvector/pgvector:pg18
+        env:
+          POSTGRES_PASSWORD: ci_fixture_only
+          POSTGRES_DB: pagila
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
     strategy:
       fail-fast: false
       matrix:
@@ -83,13 +107,30 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      # Pagila, then the fourteen faults, then the read-only role — in that
+      # order, because `GRANT ... ON ALL TABLES` only covers tables that exist
+      # when it runs. Getting that order wrong does not fail loudly: the role
+      # sees none of the damaged tables and the scanner reports zero findings
+      # with complete confidence, which is the exact product fault this
+      # repository exists to catch.
+      - name: Build the Pagila fixture
+        env:
+          PGPASSWORD: ci_fixture_only
+        run: bash packages/test-fixtures/load-pagila.sh
+
       - name: Test
+        env:
+          # Both, because they mean different things. TEST_PG_DSN is what a
+          # scan is pointed at; LEDAR_PAGILA_DSN is what the fixture gate
+          # checks before letting a regression suite assert anything.
+          TEST_PG_DSN: postgresql://ledar_reader:fixture_no_real_data@127.0.0.1:55432/pagila?sslmode=disable
+          LEDAR_PAGILA_DSN: postgresql://ledar_reader:fixture_no_real_data@127.0.0.1:55432/pagila?sslmode=disable
         run: npm test 2>&1 | tee test-output.txt
 
       - name: Check that only the database-backed suites skipped
         shell: bash
         run: |
-          EXPECTED_SKIPS=7
+          EXPECTED_SKIPS=0
           skipped=$(grep -oE '^. skipped [0-9]+' test-output.txt | grep -oE '[0-9]+$' | tail -1)
           failed=$(grep -oE '^. fail [0-9]+' test-output.txt | grep -oE '[0-9]+$' | tail -1)
 
@@ -106,26 +147,30 @@ jobs:
           fi
           if [ "$skipped" -ne "$EXPECTED_SKIPS" ]; then
             echo "::error::$skipped suite(s) skipped; exactly $EXPECTED_SKIPS should."
-            echo "::error::The seven that skip here need the Pagila fixture container, which"
-            echo "::error::this repository does not have. A different number means either a"
-            echo "::error::suite that used to run has stopped, or a database-backed test was"
-            echo "::error::added without updating EXPECTED_SKIPS in this workflow."
+            echo "::error::Every suite has a database now — the fixture is built by the step"
+            echo "::error::above. A skip means either that step half-succeeded, or that the"
+            echo "::error::role cannot see the damaged tables, which looks identical to a"
+            echo "::error::clean database and is why the count is asserted rather than read."
             grep -iE 'skip' test-output.txt | head -40
             exit 1
           fi
 
-      - name: Say what was not covered
+      - name: Say what this did and did not cover
         if: always()
         shell: bash
         run: |
           {
-            echo "### What this run did NOT cover"
+            echo "### What green means here"
             echo
-            echo "Seven suites need a Postgres fixture container that exists only in the"
-            echo "private repository. Everything they prove — the connector's scope report,"
-            echo "both rule packs against deliberately damaged tables, the redaction chain,"
-            echo "and the three CLI commands end to end — is unproven by this job."
+            echo "Every suite ran, including the seven that need a database: the"
+            echo "connector's scope report, both rule packs against fourteen deliberate"
+            echo "faults, the redaction chain, and the three CLI commands end to end."
+            echo "Node ${{ matrix.node }}, Postgres 18, zero skips."
             echo
-            echo "Green here means the code builds, type-checks, and the 316 tests that need"
-            echo "no database pass on Node ${{ matrix.node }}."
+            echo "### What it still does not cover"
+            echo
+            echo "One database, built to be broken in known ways. Nothing here says how"
+            echo "the rules behave on a schema nobody designed as a test — that is what"
+            echo "the field benches in the private repository are for, and their limits"
+            echo "are written down beside their numbers rather than implied by a tick."
           } >> "$GITHUB_STEP_SUMMARY"

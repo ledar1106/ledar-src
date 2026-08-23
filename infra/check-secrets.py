@@ -56,7 +56,11 @@ if hasattr(sys.stdout, "reconfigure"):
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "infra"))
 
-from secret_patterns import SECRET_PATTERNS, TEXT_EXT  # noqa: E402
+from secret_patterns import (  # noqa: E402
+    SECRET_PATTERNS,
+    TEXT_EXT,
+    line_is_allowed,
+)
 
 # --- lop 1: duong dan khong bao gio duoc theo doi --------------------------
 #
@@ -82,19 +86,6 @@ FORBIDDEN_EXCEPTIONS = [
     ".env.example",
     "infra/.env.example",
 ]
-
-# --- lop 2: gia tri khong phai secret --------------------------------------
-#
-# Mat khau cua container fixture. Xem docstring dau file: ngoai le khoa vao
-# gia tri nay, khong khoa vao file nao.
-FIXTURE_PASSWORD = "fixture_no_real_data"
-
-# Mot "mat khau" la placeholder thi khong phai mat khau.
-PLACEHOLDER = re.compile(r"^(\$\{[^}]*\}|\$[A-Za-z_][A-Za-z0-9_]*|%[^%]*%|<[^>]*>|\.\.\.|xxx+|\*+)$")
-
-# Bat mat khau ra khoi mot DSN, de hoi xem no co phai la mot trong hai thu tren.
-DSN = re.compile(r"\bpostgres(?:ql)?://[^\s:@/]+:([^\s@/]+)@")
-
 
 def git(args):
     return subprocess.run(
@@ -134,20 +125,6 @@ def path_is_forbidden(rel):
         if fnmatch.fnmatch(rel, bad) or fnmatch.fnmatch(name, bad):
             return True
     return False
-
-
-def line_is_allowed(line):
-    """True khi dong nay khop pattern nhung khong chua secret nao."""
-    passwords = DSN.findall(line)
-    if not passwords:
-        return False
-    # Moi mat khau trong dong phai la thu da biet la khong phai secret.
-    # `all` chu khong phai `any`: mot dong co ca DSN fixture LAN mot DSN that
-    # thi phai truot.
-    return all(
-        p == FIXTURE_PASSWORD or PLACEHOLDER.match(p) is not None
-        for p in passwords
-    )
 
 
 def scan(rel):
