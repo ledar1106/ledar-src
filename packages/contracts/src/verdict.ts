@@ -46,6 +46,9 @@
  * Postgres in the room.
  */
 
+import { t } from './i18n.js';
+import type { Lang } from './i18n.js';
+
 /** What the printer knows by the time the report has been assembled. */
 export type VerdictInput = {
   /**
@@ -121,9 +124,6 @@ export type Verdict = {
   meaning: string[];
 };
 
-const plural = (n: number, one: string, many: string): string =>
-  n === 1 ? one : many;
-
 /**
  * The gaps, in the order a reader can act on them.
  *
@@ -131,38 +131,24 @@ const plural = (n: number, one: string, many: string): string =>
  * clean result. Unchecked targets last: it is the rarest, and it is already
  * itemised further up the report by name.
  */
-function gapsIn(input: VerdictInput): string[] {
+function gapsIn(input: VerdictInput, lang: Lang): string[] {
   const out: string[] = [];
 
   if (input.tablesEmpty > 0 && input.tablesTotal > 0) {
     out.push(
-      `${input.tablesEmpty} of the ${input.tablesTotal} ` +
-        `${plural(input.tablesTotal, 'table', 'tables')} ` +
-        `${plural(input.tablesEmpty, 'holds', 'hold')} no rows. A query ran ` +
-        `against ${plural(input.tablesEmpty, 'it', 'them')} and came back ` +
-        `with nothing, so nothing was learned there either way.`,
+      t(lang, 'verdict.gap.empty-tables', {
+        empty: input.tablesEmpty,
+        total: input.tablesTotal,
+      }),
     );
   }
 
   if (input.columnsWithNoRows > 0) {
-    out.push(
-      `${input.columnsWithNoRows} ` +
-        `${plural(input.columnsWithNoRows, 'column', 'columns')} that a data ` +
-        `rule was aiming at had no rows to compare. ` +
-        `${plural(input.columnsWithNoRows, 'That column is', 'Those columns are')} ` +
-        `neither clean nor dirty; ` +
-        `${plural(input.columnsWithNoRows, 'it was', 'they were')} unreadable ` +
-        `on the only question that mattered.`,
-    );
+    out.push(t(lang, 'verdict.gap.empty-columns', { count: input.columnsWithNoRows }));
   }
 
   if (input.targetsNotChecked > 0) {
-    out.push(
-      `${input.targetsNotChecked} ` +
-        `${plural(input.targetsNotChecked, 'target', 'targets')} a rule was ` +
-        `entitled to check ${plural(input.targetsNotChecked, 'was', 'were')} ` +
-        `not checked. They are named above, with the reason for each.`,
-    );
+    out.push(t(lang, 'verdict.gap.not-checked', { count: input.targetsNotChecked }));
   }
 
   return out;
@@ -176,8 +162,8 @@ function gapsIn(input: VerdictInput): string[] {
  * matters — the report that says least is the one whose conclusion needs the
  * most saying.
  */
-export function reportVerdict(input: VerdictInput): Verdict {
-  const gaps = gapsIn(input);
+export function reportVerdict(input: VerdictInput, lang: Lang = 'en'): Verdict {
+  const gaps = gapsIn(input, lang);
 
   const everythingEmpty =
     input.tablesTotal > 0 && input.tablesEmpty === input.tablesTotal;
@@ -185,62 +171,34 @@ export function reportVerdict(input: VerdictInput): Verdict {
   if (everythingEmpty) {
     return {
       kind: 'nothing_seen',
-      headline:
-        'Nothing in this report is a statement about your data, because ' +
-        'there is no data.',
-      gaps: [
-        `All ${input.tablesTotal} ${plural(input.tablesTotal, 'table', 'tables')} ` +
-          `here hold no rows. Only the structure was examined.`,
-      ],
-      meaning: [
-        'A clean result on an empty database means nothing was looked at — ' +
-          'not that everything is fine.',
-      ],
+      headline: t(lang, 'verdict.nothing-seen'),
+      gaps: [t(lang, 'verdict.nothing-seen.all-empty', { total: input.tablesTotal })],
+      meaning: [t(lang, 'verdict.nothing-seen.meaning')],
     };
   }
 
   if (input.raised === 0 && gaps.length > 0) {
     return {
       kind: 'silence_with_gaps',
-      headline:
-        'I raised nothing, and that is not the same as nothing being wrong.',
+      headline: t(lang, 'verdict.silence-with-gaps'),
       gaps,
-      meaning: [
-        'An empty table is not a clean one. If you expected data in ' +
-          'those tables, the absence is itself worth asking about — and it ' +
-          'is the one thing here whose meaning I cannot tell you.',
-      ],
+      meaning: [t(lang, 'verdict.silence-with-gaps.meaning')],
     };
   }
 
   if (input.raised === 0) {
     return {
       kind: 'silence_is_clean',
-      headline:
-        'I raised nothing, and this time there is no gap behind that.',
+      headline: t(lang, 'verdict.silence-is-clean'),
       gaps: [],
-      meaning: [
-        'Every target these rules cover had rows in it and was checked. ' +
-          'Within the scope on the line above, this is a result rather than ' +
-          'a silence — which is not something the other reports in this ' +
-          'shape can say.',
-      ],
+      meaning: [t(lang, 'verdict.silence-is-clean.meaning')],
     };
   }
 
   return {
     kind: 'raised',
-    headline:
-      `I raised ${input.raised} ${plural(input.raised, 'thing', 'things')}. ` +
-      `Whether ${plural(input.raised, 'it is a problem', 'they are problems')} ` +
-      `is your call, not mine.`,
+    headline: t(lang, 'verdict.raised', { count: input.raised }),
     gaps,
-    meaning:
-      gaps.length > 0
-        ? [
-            'A rule that raised nothing about those raised nothing because ' +
-              'it could not look, not because it looked and was satisfied.',
-          ]
-        : [],
+    meaning: gaps.length > 0 ? [t(lang, 'verdict.raised.meaning')] : [],
   };
 }

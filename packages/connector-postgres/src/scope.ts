@@ -318,8 +318,101 @@ function list(names: readonly string[]): string {
   return names.join(', ');
 }
 
+/**
+ * The message keys this file needs, and nothing else.
+ *
+ * Declared here rather than imported because this package deliberately does
+ * not depend on `@ledar/contracts`. NOTICE calls it *"the part that touches
+ * your database"*, and widening the dependency surface of the one package that
+ * has to stay auditable is a real cost for a convenience.
+ *
+ * The CLI's translator is typed over the whole `MessageKey` union, so it is
+ * assignable to this narrower one. If a key here is ever dropped from that
+ * union, the assignment at the call site stops compiling — so the two
+ * declarations cannot drift apart in silence.
+ */
+export type ScopeMessageKey =
+  | 'scope.nothing-asked'
+  | 'scope.granted-when-unknown'
+  | 'scope.tables-in'
+  | 'scope.refused'
+  | 'scope.missing'
+  | 'scope.not-looked-at'
+  | 'scope.unreadable-tables'
+  | 'scope.unreadable-columns'
+  | 'scope.outside'
+  | 'scope.outside-within-reach';
+
+export type ScopeTranslate = (
+  key: ScopeMessageKey,
+  params?: Record<string, string | number>,
+) => string;
+
+/**
+ * The English wording, used when no translator is handed in.
+ *
+ * A default rather than a required argument because this function has six
+ * callers and only one of them renders a report for a person. Tests and
+ * internal callers keep working unchanged, and the one that matters passes
+ * the reader's language.
+ */
+const EN_FALLBACK: ScopeTranslate = (key, p = {}) => {
+  const v = (k: string): string => String(p[k] ?? '');
+  const many = (k: string, one: string, more: string): string =>
+    Number(p[k] ?? 0) === 1 ? one : more;
+  switch (key) {
+    case 'scope.nothing-asked':
+      return (
+        `No schema was asked for, so nothing here was read at all. ${v('tables')} ` +
+        `tables exist in this database` +
+        (Number(p['readable'] ?? 0) > 0
+          ? `, ${v('readable')} of them readable by this account`
+          : '') +
+        `, and none of them were looked at`
+      );
+    case 'scope.granted-when-unknown':
+      return 'I do not know when this access was granted — Postgres does not record it';
+    case 'scope.tables-in':
+      return `${v('readable')} of ${v('total')} tables in ${v('schemas')}`;
+    case 'scope.refused':
+      return (
+        `${v('schemas')} — asked for, and this account has no access to ` +
+        `${many('count', 'it', 'them')}. Nothing here was read, which is not ` +
+        `the same as nothing being there`
+      );
+    case 'scope.missing':
+      return `${v('schemas')} — asked for, and this database has no schema by that name`;
+    case 'scope.not-looked-at':
+      return `Not looked at at all: ${v('schemas')}${v('more')}`;
+    case 'scope.unreadable-tables':
+      return (
+        `${v('count')} tables here exist that this account cannot read — ` +
+        `nothing below says anything about them`
+      );
+    case 'scope.unreadable-columns':
+      return (
+        `${v('count')} columns are hidden from this account inside tables it ` +
+        `can otherwise read`
+      );
+    case 'scope.outside':
+      return (
+        `${v('count')} more tables exist in this database, outside ` +
+        `${v('schemas')}. Nothing below is about ${many('count', 'it', 'them')}`
+      );
+    case 'scope.outside-within-reach':
+      return (
+        `  of those, ${v('count')} ${many('count', 'is', 'are')} readable by ` +
+        `this account — not out of reach, just not in the schemas I was ` +
+        `pointed at`
+      );
+  }
+};
+
 /** The scope, said the way a person would say it. */
-export function describeScope(s: ScopeReport): string[] {
+export function describeScope(
+  s: ScopeReport,
+  T: ScopeTranslate = EN_FALLBACK,
+): string[] {
   const lines: string[] = [];
   const asked = s.schemasRequested;
 
@@ -328,22 +421,21 @@ export function describeScope(s: ScopeReport): string[] {
     // nothing is indistinguishable from a report of nothing wrong unless
     // somebody says this sentence.
     lines.push(
-      `No schema was asked for, so nothing here was read at all. ` +
-        `${s.tablesInDatabase} tables exist in this database` +
-        (s.tablesReadableInDatabase > 0
-          ? `, ${s.tablesReadableInDatabase} of them readable by this account`
-          : '') +
-        `, and none of them were looked at`,
+      T('scope.nothing-asked', {
+        tables: s.tablesInDatabase,
+        readable: s.tablesReadableInDatabase,
+      }),
     );
-    lines.push(
-      `I do not know when this access was granted — Postgres does not record it`,
-    );
+    lines.push(T('scope.granted-when-unknown'));
     return lines;
   }
 
   lines.push(
-    `${s.tablesReadable} of ${s.tablesInRequestedSchemas} tables in ` +
-      `${list(asked)}`,
+    T('scope.tables-in', {
+      readable: s.tablesReadable,
+      total: s.tablesInRequestedSchemas,
+      schemas: list(asked),
+    }),
   );
 
   // Said before the counts are explained, because it changes what they mean.
@@ -352,39 +444,30 @@ export function describeScope(s: ScopeReport): string[] {
   // nothing wrong.
   if (s.schemasRefused.length > 0) {
     lines.push(
-      `${list(s.schemasRefused)} — asked for, and this account has no access ` +
-        `to ${s.schemasRefused.length === 1 ? 'it' : 'them'}. Nothing here was ` +
-        `read, which is not the same as nothing being there`,
+      T('scope.refused', {
+        schemas: list(s.schemasRefused),
+        count: s.schemasRefused.length,
+      }),
     );
   }
 
   if (s.schemasMissing.length > 0) {
-    lines.push(
-      `${list(s.schemasMissing)} — asked for, and this database has no schema ` +
-        `by that name`,
-    );
+    lines.push(T('scope.missing', { schemas: list(s.schemasMissing) }));
   }
 
   const unreadable = s.tablesInRequestedSchemas - s.tablesReadable;
   if (unreadable > 0) {
-    lines.push(
-      `${unreadable} tables here exist that this account cannot read — ` +
-        `nothing below says anything about them`,
-    );
+    lines.push(T('scope.unreadable-tables', { count: unreadable }));
   }
 
   if (s.columnsUnreadable > 0) {
-    lines.push(
-      `${s.columnsUnreadable} columns are hidden from this account inside ` +
-        `tables it can otherwise read`,
-    );
+    lines.push(T('scope.unreadable-columns', { count: s.columnsUnreadable }));
   }
 
   const outside = s.tablesInDatabase - s.tablesInRequestedSchemas;
   if (outside > 0) {
     lines.push(
-      `${outside} more tables exist in this database, outside ${list(asked)}. ` +
-        `Nothing below is about ${outside === 1 ? 'it' : 'them'}`,
+      T('scope.outside', { count: outside, schemas: list(asked) }),
     );
 
     // The correction that keeps the sentence above from being read as "and
@@ -393,11 +476,7 @@ export function describeScope(s: ScopeReport): string[] {
     // here rather than left to the reader's assumption.
     const withinReach = s.tablesReadableInDatabase - s.tablesReadable;
     if (withinReach > 0) {
-      lines.push(
-        `  of those, ${withinReach} ${withinReach === 1 ? 'is' : 'are'} readable ` +
-          `by this account — not out of reach, just not in the schemas I was ` +
-          `pointed at`,
-      );
+      lines.push(T('scope.outside-within-reach', { count: withinReach }));
     }
   }
 
@@ -407,12 +486,10 @@ export function describeScope(s: ScopeReport): string[] {
       s.schemasNotLookedAt.length > 6
         ? ` and ${s.schemasNotLookedAt.length - 6} more`
         : '';
-    lines.push(`Not looked at at all: ${shown}${more}`);
+    lines.push(T('scope.not-looked-at', { schemas: shown, more }));
   }
 
-  lines.push(
-    `I do not know when this access was granted — Postgres does not record it`,
-  );
+  lines.push(T('scope.granted-when-unknown'));
 
   return lines;
 }

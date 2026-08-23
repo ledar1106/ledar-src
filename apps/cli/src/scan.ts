@@ -39,6 +39,9 @@ import {
   scopeCoverageSentence,
   scopeStripLine,
   reportVerdict,
+  langFromEnv,
+  num,
+  translator,
 } from '@ledar/contracts';
 import type { Coverage, Finding, ScopeManifest } from '@ledar/contracts';
 import { runLayerA } from '@ledar/packs-layer-a';
@@ -57,6 +60,32 @@ import type {
 
 import { ledarDir } from './paths.js';
 import { wrap } from './text.js';
+
+/**
+ * The language this run speaks, decided once.
+ *
+ * VS-7 measured why: five readers, none of whom could read the English the
+ * report was written in, so it had to be translated by hand before the gate
+ * could run. English stays the default — a report is evidence about someone's
+ * database, and the person reading it later may not be the person who ran it,
+ * so choosing is explicit rather than inferred from a machine's locale.
+ */
+const LANG = langFromEnv(process.env);
+const T = translator(LANG);
+
+/**
+ * A section rule, padded to one width whatever language filled it.
+ *
+ * Hard-coded dashes were fine while every heading was English and its length
+ * was known when it was typed. `NHUNG CHO DANG HOI LAI` is not the width of
+ * `PATTERNS WORTH ASKING ABOUT`, and a rule that stops mid-line reads as a
+ * rendering fault rather than a heading.
+ */
+const HEAD_WIDTH = 58;
+function heading(text: string): string {
+  const prefix = `  ── ${text} `;
+  return prefix + '─'.repeat(Math.max(3, HEAD_WIDTH - prefix.length));
+}
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '../../..');
@@ -370,18 +399,12 @@ class RunHistory {
     const r = this.retired;
     const held =
       r.runs === null
-        ? 'its contents could not be counted'
-        : `it holds ${r.runs} earlier ${r.runs === 1 ? 'run' : 'runs'}`;
+        ? T('history.holds-uncounted')
+        : T('history.holds-runs', { runs: r.runs });
 
     return [
-      `history: the file already at that path was written by schema version ` +
-        `${r.version},`,
-      `         which this build cannot read. It has been MOVED, not deleted:`,
-      `           ${r.to}`,
-      `         Nothing in it was changed — ${held}. There is no upgrade path,`,
-      `         because the older format has no room for where a claim came`,
-      `         from, and inventing that would be worse than starting fresh.`,
-      `         Delete it whenever you like. Nothing here will touch it again.`,
+      T('history.moved', { version: r.version, to: r.to, held }),
+      T('history.delete-freely'),
     ];
   }
 
@@ -390,15 +413,19 @@ class RunHistory {
     const moved = this.retirementLines();
 
     if (this.problem === null) {
-      return [...moved, `history: recorded as run ${this.recorded} in ${this.file}`];
+      return [
+        ...moved,
+        // `?? 0` for the same reason as below: with no problem recorded there
+        // is always a run number, but that is an invariant of how the two
+        // fields are set together rather than one the type carries.
+        T('history.recorded', { run: this.recorded ?? 0, file: this.file }),
+      ];
     }
 
     if (this.recorded === null) {
       return [
         ...moved,
-        `history: this run was NOT recorded — ${this.problem}`,
-        `         the report above stands; there is just nothing for the next`,
-        `         scan to compare it against`,
+        T('history.not-recorded', { problem: this.problem }),
       ];
     }
 
@@ -407,10 +434,15 @@ class RunHistory {
     // clean one later.
     return [
       ...moved,
-      `history: run ${this.recorded} in ${this.file} was left unfinished —`,
-      `         ${this.problem}`,
-      `         the report above stands; that run will read as incomplete,`,
-      `         because it is`,
+      T('history.unfinished', {
+        // Reached only when `recorded` is non-null - the branch above returns
+        // for the null case - but the compiler cannot see that across the two
+        // `if`s, and asserting it away would outlive the shape that makes it
+        // true.
+        run: this.recorded ?? 0,
+        file: this.file,
+        problem: this.problem,
+      }),
     ];
   }
 }
@@ -431,11 +463,18 @@ function printFact(f: Finding): void {
   // beside the other things a person acts on rather than reads.
   for (const line of wrap(f.plainText, 68)) console.log(`    ${line}`);
   console.log('');
-  console.log(`      where: ${f.schema}.${f.table} (severity: ${f.severity})`);
+  console.log(
+    `      ${T('scan.where-with-severity', {
+      target: `${f.schema}.${f.table}`,
+      severity: f.severity,
+    })}`,
+  );
   // Wrapped for the same reason the sentence above is. This half is for the
   // person who will act on it rather than the person deciding whether to,
   // but a 250-character line is no kinder to them.
-  for (const line of wrap(`why: ${f.technical}`, 66)) console.log(`      ${line}`);
+  for (const line of wrap(T('scan.why', { detail: f.technical }), 66)) {
+    console.log(`      ${line}`);
+  }
   if (f.evidence) {
     console.log(
       `      ${f.evidence.rowCount} rows · ${f.evidence.durationMs.toFixed(0)}ms`,
@@ -481,15 +520,12 @@ function printSamplingFloor(sampling: {
   const shown = floor < 0.01 ? floor.toFixed(4) : floor.toFixed(2);
 
   console.log('');
-  const floorLine =
-    `      ${sampling.columns} of those columns ` +
-      `${sampling.columns === 1 ? 'was' : 'were'} too large to ` +
-      `read in full, so ${sampling.columns === 1 ? 'it was' : 'they were'} ` +
-      `sampled — the smallest sample was ${sampling.smallestDraw.toLocaleString('en-US')} ` +
-      `rows. Broken links rarer than roughly ${shown}% of a table can be missed ` +
-      `entirely by a sample that size, so silence about ` +
-      `${sampling.columns === 1 ? 'it' : 'them'} is not the same as a clean bill.`;
-  for (const line of wrap(floorLine.trim(), 66)) console.log(`      ${line}`);
+  const floorLine = T('scan.sampling-floor', {
+    columns: sampling.columns,
+    smallest: num(sampling.smallestDraw, LANG),
+    floor: shown,
+  });
+  for (const line of wrap(floorLine, 66)) console.log(`      ${line}`);
 }
 
 /**
@@ -514,19 +550,11 @@ function printEmptyColumns(checked: number, empty: number): void {
 
   console.log('');
   if (empty === checked) {
-    const all =
-      `All ${checked} of those had no rows to compare — the tables ` +
-      `holding them are empty. A query ran against each and came back with ` +
-      `nothing, so nothing at all was learned here. An empty table is not a ` +
-      `clean one.`;
+    const all = T('scan.empty-columns.all', { checked });
     for (const line of wrap(all, 66)) console.log(`      ${line}`);
     return;
   }
-  const some =
-    `${empty} of those ${checked} had no rows to compare — the ` +
-    `${empty === 1 ? 'table holding it is' : 'tables holding them are'} empty, ` +
-    `so nothing was learned about ${empty === 1 ? 'that one' : 'them'}. An ` +
-    `empty table is not a clean one.`;
+  const some = T('scan.empty-columns.some', { empty, checked });
   for (const line of wrap(some, 66)) console.log(`      ${line}`);
 }
 
@@ -575,12 +603,14 @@ function printQuestion(f: Finding): void {
   // paragraph is read.
   for (const line of wrap(f.plainText, 68)) console.log(`    ${line}`);
   console.log('');
-  console.log(`      where: ${f.schema}.${f.table}.${f.columns[0] ?? ''}`);
-  for (const line of wrap(`what I measured: ${f.technical}`, 66)) {
+  console.log(
+    `      ${T('scan.where', { target: `${f.schema}.${f.table}.${f.columns[0] ?? ''}` })}`,
+  );
+  for (const line of wrap(T('scan.what-i-measured', { detail: f.technical }), 66)) {
     console.log(`      ${line}`);
   }
   console.log('');
-  for (const line of semanticQuestionFor(f).split('\n')) {
+  for (const line of semanticQuestionFor(f, LANG).split('\n')) {
     console.log(`      ${line}`);
   }
   console.log('');
@@ -611,8 +641,8 @@ async function main(): Promise<number> {
       const empty = await probeEmptyTables(client, graph.tables);
       // Half each. Neither layer gets to starve the other by running first,
       // which is what happens with one shared pot consumed in order.
-      const layerA = await runLayerA(client, graph, budget.share(0.5));
-      const layerB = await runImplicitForeignKeys(client, graph, budget.share(0.5));
+      const layerA = await runLayerA(client, graph, budget.share(0.5), LANG);
+      const layerB = await runImplicitForeignKeys(client, graph, budget.share(0.5), LANG);
 
       /**
        * The one line the report is never allowed to be without.
@@ -638,7 +668,7 @@ async function main(): Promise<number> {
         ...layerA.rules,
         ...layerB.rules,
       ]);
-      const strip = scopeStripLine(stripData);
+      const strip = scopeStripLine(stripData, LANG);
 
       return { graph, empty, layerA, layerB, strip, stripData };
     })().catch((err: unknown) => {
@@ -680,7 +710,7 @@ async function main(): Promise<number> {
       tablesEmpty: empty.size,
       columnsWithNoRows: layerB.columnsWithNoRows,
       targetsNotChecked: stripData.targetsNotChecked,
-    });
+    }, LANG);
 
     /**
      * What Layer B covered, in the only terms that can be stated honestly.
@@ -763,24 +793,33 @@ async function main(): Promise<number> {
     const disclosure = disclosureFor(verdict);
 
     console.log('');
-    console.log('  WHAT I WAS ABLE TO LOOK AT');
+    console.log(`  ${T('head.looked-at')}`);
     console.log('');
-    console.log(`    ${scopeCoverageSentence(manifest)}`);
-    for (const line of describeScope(scope)) console.log(`    ${line}`);
+    for (const line of wrap(scopeCoverageSentence(manifest, LANG), 68)) {
+      console.log(`    ${line}`);
+    }
+    for (const line of describeScope(scope, T)) {
+      for (const wrapped of wrap(line, 68)) console.log(`    ${wrapped}`);
+    }
     console.log(
-      `    connected as ${verdict.session.currentUser}, read-only ` +
-        `${verdict.kind === 'read_only_enforced' ? 'enforced by the database' : 'NOT enforced'}`,
+      `    ${T('scan.connected-as', {
+        user: verdict.session.currentUser,
+        enforcement: T(
+          verdict.kind === 'read_only_enforced'
+            ? 'scan.read-only-enforced'
+            : 'scan.read-only-not-enforced',
+        ),
+      })}`,
     );
     if (disclosure) console.log(`    ${disclosure}`);
 
     if (empty.size === graph.tables.length && graph.tables.length > 0) {
       console.log('');
-      console.log('    ⚠  EVERY TABLE HERE IS EMPTY.');
+      console.log(`    ⚠  ${T('scan.every-table-empty')}`);
       console.log('');
-      console.log('       Nothing below is a statement about your data, because');
-      console.log('       there is no data. Only the structure was examined. A');
-      console.log('       clean result on an empty database means nothing was');
-      console.log('       looked at — not that everything is fine.');
+      for (const line of wrap(T('scan.every-table-empty.body'), 68)) {
+        console.log(`       ${line}`);
+      }
     } else if (conclusion.kind === 'silence_with_gaps') {
       // The one shape where the caveat cannot wait for the end.
       //
@@ -806,10 +845,12 @@ async function main(): Promise<number> {
         console.log('');
       }
     } else if (empty.size > 0) {
-      console.log(
-        `    ${empty.size} of ${graph.tables.length} tables hold no rows — ` +
-          `data rules could not say anything about those`,
-      );
+      for (const line of wrap(
+        T('scan.tables-empty-line', { empty: empty.size, total: graph.tables.length }),
+        68,
+      )) {
+        console.log(`    ${line}`);
+      }
     }
     console.log('');
 
@@ -834,12 +875,12 @@ async function main(): Promise<number> {
     const facts = layerA.findings.filter((f) => !saysNothingFound(f));
     const negatives = layerA.findings.filter(saysNothingFound);
 
-    console.log('  ── WHAT THE DATABASE ITSELF CONFIRMS ─────────────────────');
+    console.log(heading(T('head.database-confirms')));
     console.log('');
     if (facts.length > 0) {
-      console.log('    The counts here are facts — a query reproduces every one.');
-      console.log('    Whether a fact is a problem is a separate question, and');
-      console.log('    not one I can answer for you.');
+      for (const line of wrap(T('scan.facts-are-facts'), 68)) {
+        console.log(`    ${line}`);
+      }
       console.log('');
     }
     if (facts.length === 0) {
@@ -851,8 +892,8 @@ async function main(): Promise<number> {
         // a result. An abstention has no result to caveat, so it says what it
         // is instead. The sentence a reader skims has to differ, or the split
         // that debt N8 made in the data never reaches them.
-        const lead = n.kind === 'abstained' ? 'and that is all I can say:' : 'but only this far:';
-        for (const line of wrap(`${lead} ${n.boundary}`, 66)) {
+        const lead = n.kind === 'abstained' ? 'scan.and-that-is-all' : 'scan.but-only-this-far';
+        for (const line of wrap(T(lead, { boundary: n.boundary }), 66)) {
           console.log(`      ${line}`);
         }
         console.log('');
@@ -862,30 +903,31 @@ async function main(): Promise<number> {
     }
 
     // ---- Layer B ---------------------------------------------------------
-    console.log('  ── PATTERNS WORTH ASKING ABOUT ───────────────────────────');
+    console.log(heading(T('head.patterns')));
     console.log('');
-    console.log('    Not problems. Things that look like a rule nobody wrote down.');
-    console.log('    I cannot tell a leftover from a decision — only you can.');
+    for (const line of wrap(T('scan.patterns-preamble'), 68)) {
+      console.log(`    ${line}`);
+    }
     console.log('');
 
     if (layerB.findings.length === 0) {
-      console.log('    Nothing stood out.');
+      console.log(`    ${T('scan.nothing-stood-out')}`);
       console.log('');
-      const bound =
-        `but only this far: looked at ${layerB.candidatesConsidered} ` +
-        `column${layerB.candidatesConsidered === 1 ? '' : 's'} whose name suggests ` +
-        `it points at another table, and checked ${layerB.candidatesVerified} of ` +
-        `them against real values. Columns that are named nothing like a ` +
-        `reference were not considered at all.`;
+      const bound = T('scan.layer-b-boundary', {
+        considered: layerB.candidatesConsidered,
+        verified: layerB.candidatesVerified,
+      });
       for (const line of wrap(bound, 66)) console.log(`      ${line}`);
       printEmptyColumns(layerB.candidatesVerified, layerB.columnsWithNoRows);
       printSamplingFloor(layerB.sampling);
       if (layerB.partitionsCovered > 0) {
         console.log('');
-        console.log(
-          `      ${layerB.partitionsCovered} partitions were covered by querying ` +
-            `their parent table, not skipped`,
-        );
+        for (const line of wrap(
+          T('scan.partitions-covered', { count: layerB.partitionsCovered }),
+          66,
+        )) {
+          console.log(`      ${line}`);
+        }
       }
       console.log('');
     } else {
@@ -907,8 +949,7 @@ async function main(): Promise<number> {
     // half of the same error the heading used to make — understating the
     // work while overstating what was missed.
     printSetAside(
-      `checked and ruled out ${layerB.ruledOut.length} ` +
-        `(queried, and the values did not back the guess):`,
+      T('scan.ruled-out', { count: layerB.ruledOut.length }),
       layerB.ruledOut,
     );
 
@@ -924,7 +965,7 @@ async function main(): Promise<number> {
     // arrived at. "Nothing was learned" is what all of them have in common,
     // and it is all the heading is entitled to say.
     printSetAside(
-      `did not check ${layerB.notExamined.length} (nothing was learned about these):`,
+      T('scan.did-not-check', { count: layerB.notExamined.length }),
       layerB.notExamined,
     );
     const budgetLine = budget.disclosure();
@@ -949,7 +990,7 @@ async function main(): Promise<number> {
     // The heading is a question about evidence rather than a verdict word.
     // "SUMMARY" would invite skipping it as a repeat of what is above, and it
     // is not a repeat: nothing above states what may be concluded.
-    console.log('  ── WHAT THIS REPORT WILL AND WILL NOT SUPPORT ────────────');
+    console.log(heading(T('head.verdict')));
     console.log('');
     for (const line of wrap(conclusion.headline, 68)) console.log(`    ${line}`);
     console.log('');
@@ -992,10 +1033,14 @@ async function main(): Promise<number> {
       raisedPerRule[f.rule] = (raisedPerRule[f.rule] ?? 0) + 1;
     }
     if (Object.keys(raisedPerRule).length > 0) {
-      const silent = scopeStripByRule([...layerA.rules, ...layerB.rules], raisedPerRule);
+      const silent = scopeStripByRule(
+        [...layerA.rules, ...layerB.rules],
+        raisedPerRule,
+        LANG,
+      );
       if (silent.length > 0) {
         console.log('');
-        console.log('      the rules that raised nothing, and what they covered:');
+        console.log(`      ${T('scan.silent-rules')}`);
         for (const line of silent) console.log(`        ${line}`);
       }
     }
@@ -1003,16 +1048,28 @@ async function main(): Promise<number> {
 
     const sp = budget.spend;
     console.log(
-      `      cost to your database: ${sp.queries} queries · ` +
-        `${(sp.totalMs / 1000).toFixed(1)}s · ${sp.rowsScanned.toLocaleString('en-US')} rows read`,
+      `      ${T('scan.cost', {
+        queries: num(sp.queries, LANG),
+        seconds: (sp.totalMs / 1000).toFixed(1),
+        rows: num(sp.rowsScanned, LANG),
+      })}`,
     );
     console.log('');
-    for (const line of history.lines()) console.log(`      ${line}`);
+    // Split on newlines the message put there; NOT wrapped.
+    //
+    // The recorded case is a label followed by a filesystem path, and wrapping
+    // broke the path onto its own line — which reads as two facts, and which
+    // four tests that extract the run number from this line stopped matching.
+    // Messages that need more than one line carry their own breaks, the way
+    // this code did before the catalogue.
+    for (const line of history.lines()) {
+      for (const piece of line.split('\n')) console.log(`      ${piece}`);
+    }
     console.log('');
     // Printed in full, unprompted. Someone deciding whether to grant access
     // is really deciding whether they can undo it, and an undo they have to
     // go looking for is not much of an undo.
-    console.log('      to take this access away, run:');
+    console.log(`      ${T('scan.revoke')}`);
     console.log('');
     for (const l of scope.revokeSql.split(/\r?\n/)) {
       if (l.trim().startsWith('--') || l.trim() === '') continue;

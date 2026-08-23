@@ -29,6 +29,8 @@ import {
   type RuleCoverage,
   type SealedFinding,
 } from '@ledar/contracts';
+import { translator } from '@ledar/contracts';
+import type { Lang, Translate } from '@ledar/contracts';
 
 const SAMPLE_LIMIT = 5;
 const COUNT_LIMIT = 10_000;
@@ -115,56 +117,18 @@ function asCoverageSkips(skips: readonly SkippedTarget[]): Coverage['skipped'] {
  * detail: "nothing found" and "nothing looked at" produce the same empty
  * list, and only the sentence tells them apart.
  */
-function constraintPlainText(eligible: number, checked: number): string {
-  if (eligible === 0) {
-    return (
-      `Nothing here was left half-enforced: this database has no constraints ` +
-      `that Postgres was told to keep but never checked, so there was nothing ` +
-      `for this rule to look at.`
-    );
-  }
-
-  if (checked === 0) {
-    return (
-      `I could not check any of the ${eligible} ` +
-      `constraint${eligible === 1 ? '' : 's'} in scope, so I have nothing to ` +
-      `report about them. That is not the same as nothing being wrong.`
-    );
-  }
-
-  if (checked === 1) {
-    return (
-      `The one constraint I was able to check is being kept — no row in it ` +
-      `breaks the rule it was given.`
-    );
-  }
-
-  return (
-    `Every one of the ${checked} constraints I was able to check is being ` +
-    `kept — no row in any of them breaks the rule it was given.`
-  );
+function constraintPlainText(eligible: number, checked: number, T: Translate): string {
+  if (eligible === 0) return T('layer-a.constraint.none-eligible');
+  if (checked === 0) return T('layer-a.constraint.none-checked', { eligible });
+  if (checked === 1) return T('layer-a.constraint.one-kept');
+  return T('layer-a.constraint.all-kept', { checked });
 }
 
 /** The same, for the index rule and its own denominator. */
-function indexPlainText(eligible: number, where: string): string {
-  if (eligible === 0) {
-    return (
-      `This account cannot see any indexes in ${where}, so there was nothing ` +
-      `for this rule to look at.`
-    );
-  }
-
-  if (eligible === 1) {
-    return (
-      `The one index I can see is switched on. If it was built to stop ` +
-      `duplicates, it is stopping them.`
-    );
-  }
-
-  return (
-    `All ${eligible} indexes I can see are switched on. Nothing that was ` +
-    `built to stop duplicates is sitting there not stopping them.`
-  );
+function indexPlainText(eligible: number, where: string, T: Translate): string {
+  if (eligible === 0) return T('layer-a.index.none-visible', { where });
+  if (eligible === 1) return T('layer-a.index.one-on');
+  return T('layer-a.index.all-on', { eligible });
 }
 
 /**
@@ -321,7 +285,9 @@ export async function runLayerA(
   client: Client,
   graph: SchemaGraph,
   budget: QueryBudget,
+  lang: Lang = 'en',
 ): Promise<LayerAOutcome> {
+  const T: Translate = translator(lang);
   const drafts: FindingDraft[] = [];
 
   const unvalidatedFks = graph.constraints.filter(
@@ -480,16 +446,24 @@ export async function runLayerA(
         // that case: its public dump removes private editor records on
         // purpose, leaving annotations pointing at people who are not there.
         // Stating the consequence as fact would have called that a defect.
-        `${capped ? `At least ${n}` : `${n}`} ${n === 1 ? 'row' : 'rows'} in ` +
-        `${fk.table} point at a ${fk.referencedTable} record that is not ` +
-        `there. That part is certain — I counted it. Whether it matters is ` +
-        `not: some systems keep references to records they removed on ` +
-        `purpose. If this one does not, then anything following that link — ` +
-        `a screen, a report, an export — has nothing to show for those rows.`,
+        T('layer-a.fk.plain', {
+          rows: capped ? `At least ${n}` : `${n}`,
+          count: n,
+          table: fk.table,
+          // String(), not the raw value: referencedTable is nullable, and the
+          // template literal this replaced already rendered null as "null".
+          // Preserved rather than improved — changing what a finding says is a
+          // separate decision from moving where it is written.
+          parent: String(fk.referencedTable),
+        }),
       technical:
-        `Foreign key ${fk.name} on ${fk.schema}.${fk.table} (${fk.columns.join(', ')}) ` +
-        `→ ${parent} is NOT VALID, so Postgres never checked the rows that ` +
-        `were already there. ${n}${capped ? '+' : ''} of them have no matching parent.`,
+        T('layer-a.fk.technical', {
+          name: fk.name,
+          table: `${fk.schema}.${fk.table}`,
+          columns: fk.columns.join(', '),
+          parent,
+          rows: `${n}${capped ? '+' : ''}`,
+        }),
       evidence,
       coverage: {
         checked: 1,
@@ -544,14 +518,18 @@ export async function runLayerA(
         table: c.table,
         columns: c.columns,
         plainText:
-          `${capped ? `At least ${bad}` : `${bad}`} ${bad === 1 ? 'row' : 'rows'} ` +
-          `in ${c.table} do not satisfy a rule the database was told to keep. ` +
-          `New rows have to obey it; these were already there when the rule ` +
-          `was added, and nobody went back to check them. Whether those rows ` +
-          `are wrong or the rule arrived too late is yours to say.`,
+          T('layer-a.check.plain', {
+            rows: capped ? `At least ${bad}` : `${bad}`,
+            count: bad,
+            table: c.table,
+          }),
         technical:
-          `Constraint ${c.name} on ${c.schema}.${c.table} is NOT VALID. ` +
-          `${bad}${capped ? '+' : ''} existing rows do not satisfy ${c.definition}.`,
+          T('layer-a.check.technical', {
+            name: c.name,
+            table: `${c.schema}.${c.table}`,
+            rows: `${bad}${capped ? '+' : ''}`,
+            definition: c.definition,
+          }),
         evidence: {
           sql: buildCheckViolationQuery(c).trim(),
           rowCount: bad,
@@ -658,15 +636,18 @@ export async function runLayerA(
       table: idx.table,
       columns: [],
       plainText: idx.isUnique
-        ? `${idx.table} has a uniqueness rule that is switched off. Duplicates ` +
-          `can be created right now and nothing will stop them.`
-        : `An index on ${idx.table} was left half-built. Queries relying on it ` +
-          `are reading the slow way.`,
-      technical:
-        `Index ${idx.name} on ${idx.schema}.${idx.table} has ` +
-        `indisvalid=${idx.isValid}, indisready=${idx.isReady}. This is what a ` +
-        `failed CREATE INDEX CONCURRENTLY leaves behind` +
-        (idx.isUnique ? ', and the unique constraint is not being enforced.' : '.'),
+        ? T('layer-a.index.unique.plain', { table: idx.table })
+        : T('layer-a.index.plain', { table: idx.table }),
+      technical: T('layer-a.index.technical', {
+        name: idx.name,
+        table: `${idx.schema}.${idx.table}`,
+        valid: String(idx.isValid),
+        ready: String(idx.isReady),
+        // A number, not a boolean: `Params` carries string | number, and a
+        // catalogue that had to accept booleans too would be one more shape
+        // every language file has to remember to handle.
+        unique: idx.isUnique ? 1 : 0,
+      }),
       evidence: {
         sql: evidenceSql,
         // Both measured. `rowCount` is how many catalog rows came back, which
@@ -714,36 +695,25 @@ export async function runLayerA(
     // ---- claim one: the constraints ---------------------------------------
     const tableCount = graph.tables.length;
     const constraintBoundary: string[] = [
-      `Checked ${constraintsChecked} of ${eligibleConstraints} ` +
-        `constraint${eligibleConstraints === 1 ? '' : 's'} that Postgres had ` +
-        `not validated, in ${where}, across ${tableCount} readable ` +
-        `table${tableCount === 1 ? '' : 's'}.`,
+      T('layer-a.bound.constraints-checked', {
+        checked: constraintsChecked,
+        eligible: eligibleConstraints,
+        where,
+        tables: tableCount,
+      }),
     ];
 
     // Said apart, because they are not the same news. Rolling both into
     // "ran out of budget" was a statement about cause that nothing measured,
     // and it hid the half that matters more.
     if (byCeiling > 0) {
-      constraintBoundary.push(
-        `${byCeiling} ${byCeiling === 1 ? 'was' : 'were'} not run at all — ` +
-          `the scan reached its ceiling on this database.`,
-      );
+      constraintBoundary.push(T('layer-a.bound.by-ceiling', { count: byCeiling }));
     }
     if (unreadable > 0) {
-      constraintBoundary.push(
-        `${unreadable} could not be read: the query failed. ` +
-          `${unreadable === 1 ? 'That one is' : 'Those are'} not cleared, ` +
-          `${unreadable === 1 ? 'it is' : 'they are'} unseen — and a table I ` +
-          `cannot look inside is the one worth asking about.`,
-      );
+      constraintBoundary.push(T('layer-a.bound.unreadable', { count: unreadable }));
     }
 
-    constraintBoundary.push(
-      `Constraints Postgres already validated cannot be violated and were ` +
-        `not re-checked. Nothing here says anything about rules that were ` +
-        `never declared — that is a different question, and a harder one. ` +
-        `Indexes are counted separately.`,
-    );
+    constraintBoundary.push(T('layer-a.bound.already-validated'));
 
     drafts.push({
       id: 'layer-a/none/constraints',
@@ -787,12 +757,11 @@ export async function runLayerA(
       columns: [],
       // A different sentence per situation, because one sentence covering
       // all of them would have to be true of the weakest.
-      plainText: constraintPlainText(eligibleConstraints, constraintsChecked),
-      technical:
-        `No unvalidated constraint had violating rows, across ` +
-        `${constraintsChecked} of ${eligibleConstraints} eligible ` +
-        `constraint${eligibleConstraints === 1 ? '' : 's'}. Indexes are a ` +
-        `separate rule with its own denominator.`,
+      plainText: constraintPlainText(eligibleConstraints, constraintsChecked, T),
+      technical: T('layer-a.constraint.technical', {
+        checked: constraintsChecked,
+        eligible: eligibleConstraints,
+      }),
       boundary: constraintBoundary.join(' '),
       evidence: null,
       coverage: {
@@ -836,23 +805,20 @@ export async function runLayerA(
       schema: where,
       table: '—',
       columns: [],
-      plainText: indexPlainText(eligibleIndexes, where),
-      technical:
-        `${eligibleIndexes} index${eligibleIndexes === 1 ? '' : 'es'} in ` +
-        `${where} report indisvalid and indisready true. Read from pg_index; ` +
-        `no data was queried, so nothing was skipped for budget.`,
+      plainText: indexPlainText(eligibleIndexes, where, T),
+      technical: T('layer-a.index.technical-negative', {
+        eligible: eligibleIndexes,
+        where,
+      }),
       boundary:
         (eligibleIndexes === 0
-          ? `There were no indexes visible to this account in ${where}, so ` +
-            `none were checked.`
+          ? T('layer-a.bound.no-indexes', { where })
           : eligibleIndexes === 1
-            ? `Checked the one index this account can see in ${where}.`
-            : `Checked all ${eligibleIndexes} indexes this account can see ` +
-              `in ${where}.`) +
-        ` Indexes on tables it cannot read are not in that number. And an ` +
-        `index that is switched on is not necessarily the right index — ` +
-        `whether the ones here are the ones you need is a different question, ` +
-        `and not one this rule asks.`,
+            ? T('layer-a.bound.one-index', { where })
+            : T('layer-a.bound.all-indexes', {
+                eligible: eligibleIndexes,
+                where,
+              })) + T('layer-a.bound.index-tail'),
       evidence: null,
       coverage: {
         checked: eligibleIndexes,

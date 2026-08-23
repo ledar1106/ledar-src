@@ -46,6 +46,8 @@ import { z } from 'zod';
 
 import type { ScopeManifest } from './findings.js';
 import { assertScopeManifest } from './seal.js';
+import { t } from './i18n.js';
+import type { Lang } from './i18n.js';
 
 /**
  * What one rule was able to do, in the unit that rule counts.
@@ -182,6 +184,7 @@ function refuseIfNumbersDisagree(parsed: readonly RuleCoverage[]): void {
 export function scopeStripByRule(
   rules: readonly RuleCoverage[],
   raisedPerRule: Readonly<Record<string, number>>,
+  lang: Lang = 'en',
 ): string[] {
   const parsed = rules.map((r, i) => {
     const result = RuleCoverage.safeParse(r);
@@ -199,24 +202,29 @@ export function scopeStripByRule(
   return parsed
     .filter((r) => (raisedPerRule[r.rule] ?? 0) === 0)
     .map((r) => {
-      if (!r.ran) return `${r.rule} — did not run`;
+      if (!r.ran) return t(lang, 'strip.rule.did-not-run', { rule: r.rule });
       // A denominator of null is not a zero and is never rendered as one. The
       // rule ran; how much of anything it covered is the part nobody can say.
       if (r.eligible === null) {
-        return `${r.rule} — ran, raised nothing, and cannot say out of how many`;
+        return t(lang, 'strip.rule.no-denominator', { rule: r.rule });
       }
       // A denominator of zero is its own sentence. "raised nothing, having
       // checked 0 of 0" is arithmetically true and reads like a shrug; what
       // actually happened is that this database has none of the thing the
       // rule looks for, which is an answer.
       if (r.eligible === 0) {
-        return `${r.rule} — nothing of this kind exists here to check`;
+        return t(lang, 'strip.rule.none-exist', { rule: r.rule });
       }
-      const hole = r.notChecked > 0 ? `, ${r.notChecked} not reached` : '';
-      return (
-        `${r.rule} — raised nothing, having checked ` +
-        `${r.checked} of ${r.eligible}${hole}`
-      );
+      const hole =
+        r.notChecked > 0
+          ? t(lang, 'strip.rule.not-reached', { count: r.notChecked })
+          : '';
+      return t(lang, 'strip.rule.raised-nothing', {
+        rule: r.rule,
+        checked: r.checked,
+        eligible: r.eligible,
+        hole,
+      });
     });
 }
 
@@ -277,7 +285,7 @@ export function buildScopeStrip(
  * vanishes from the line leaves a strip that reads complete, which is the one
  * thing this line must never do.
  */
-export function scopeStripLine(strip: ScopeStrip): string {
+export function scopeStripLine(strip: ScopeStrip, lang: Lang = 'en'): string {
   // Re-checked, the way `serializeEvidencePack` re-runs its own gate on a pack
   // it is handed. Every arithmetic rule above lives in `buildScopeStrip`, and
   // this function took a bare TypeScript type — so a strip assembled by hand,
@@ -290,8 +298,11 @@ export function scopeStripLine(strip: ScopeStrip): string {
 
   const tables =
     strip.tablesTotal === null
-      ? `${strip.tablesVisible} tables visible, total unknown`
-      : `${strip.tablesVisible} of ${strip.tablesTotal} tables visible`;
+      ? t(lang, 'strip.tables-visible-no-total', { visible: strip.tablesVisible })
+      : t(lang, 'strip.tables-visible', {
+          visible: strip.tablesVisible,
+          total: strip.tablesTotal,
+        });
 
   // `targets` is in both branches on purpose. It used to appear only when the
   // denominator was known, so the unknown branch printed `20 checked` bare,
@@ -301,21 +312,21 @@ export function scopeStripLine(strip: ScopeStrip): string {
   // the reader most needs the unit was the branch that dropped it.
   const eligible =
     strip.targetsEligible === null
-      ? `targets eligible unknown (${strip.rulesWithoutDenominator.length} rule` +
-        `${strip.rulesWithoutDenominator.length === 1 ? '' : 's'} could not say)`
-      : `${strip.targetsEligible} targets eligible`;
+      ? t(lang, 'strip.targets-eligible-unknown', {
+          rules: strip.rulesWithoutDenominator.length,
+        })
+      : t(lang, 'strip.targets-eligible', { count: strip.targetsEligible });
 
   const parts = [
     tables,
     eligible,
-    `${strip.targetsChecked} targets checked`,
-    `${strip.targetsNotChecked} not checked`,
+    t(lang, 'strip.targets-checked', { count: strip.targetsChecked }),
+    t(lang, 'strip.targets-not-checked', { count: strip.targetsNotChecked }),
   ];
 
   if (strip.rulesThatDidNotRun.length > 0) {
     parts.push(
-      `${strip.rulesThatDidNotRun.length} rule` +
-        `${strip.rulesThatDidNotRun.length === 1 ? '' : 's'} did not run`,
+      t(lang, 'strip.rules-did-not-run', { count: strip.rulesThatDidNotRun.length }),
     );
   }
 

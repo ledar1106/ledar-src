@@ -27,6 +27,8 @@ import {
   type RuleCoverage,
   type SealedFinding,
 } from '@ledar/contracts';
+import { num, t, translator } from '@ledar/contracts';
+import type { Lang, Translate } from '@ledar/contracts';
 
 /**
  * Which release of Layer B's detection rule produced a claim.
@@ -669,7 +671,9 @@ export async function runImplicitForeignKeys(
   client: Client,
   graph: SchemaGraph,
   budget: QueryBudget,
+  lang: Lang = 'en',
 ): Promise<LayerBOutcome> {
+  const T: Translate = translator(lang);
   const candidates = findCandidates(graph);
   const drafts: FindingDraft[] = [];
   const notExamined: NotExaminedTarget[] = [];
@@ -937,44 +941,63 @@ export async function runImplicitForeignKeys(
       // is not entitled to make claims of that shape.
       plainText:
         (plan.kind === 'exact'
-          ? `${residual.toLocaleString('en-US')} of the ${present.toLocaleString('en-US')} ` +
-            `rows in ${c.childTable} ${carry} a ${c.childColumn} that no ` +
-            `${c.parentTable} record matches. `
-          : `I looked at ${present.toLocaleString('en-US')} rows drawn from across ` +
-            `${c.childTable} — not the whole table — and ${residual.toLocaleString('en-US')} ` +
-            `of them ${carry} a ${c.childColumn} that no ${c.parentTable} record ` +
-            `matches, which is ${pct}% of what I looked at. I did not count the ` +
-            `rest of the table, so I cannot tell you how many there are in total. `) +
+          ? T('layer-b.counted', {
+              residual: num(residual, lang),
+              present: num(present, lang),
+              table: c.childTable,
+              carry,
+              column: c.childColumn,
+              parent: c.parentTable,
+            })
+          : T('layer-b.sampled', {
+              present: num(present, lang),
+              table: c.childTable,
+              residual: num(residual, lang),
+              carry,
+              column: c.childColumn,
+              parent: c.parentTable,
+              pct,
+            })) +
         (setAside > 0
-          ? `First, set aside: a further ${setAside.toLocaleString('en-US')} rows all ` +
-            `carry one and the same value. One value repeating that many times ` +
-            `reads like something this schema uses to mean "none" or "all", so I ` +
-            `did not count those as unmatched. `
+          ? T('layer-b.set-aside', { count: num(setAside, lang) })
           : '') +
-        `The other ${(matchRate * 100).toFixed(0)}% match, so the column does look ` +
-        `like it points at ${c.parentTable}. Nothing in the database enforces ` +
-        `that, so I cannot tell whether ` +
         (residual === 1
-          ? `that one row is a leftover you would want to know about, or a row `
-          : `those ${residual.toLocaleString('en-US')} are leftovers you would want ` +
-            `to know about, or rows `) +
-        `kept deliberately.`,
+          ? T('layer-b.tail-one', {
+              rate: (matchRate * 100).toFixed(0),
+              parent: c.parentTable,
+            })
+          : T('layer-b.tail-many', {
+              rate: (matchRate * 100).toFixed(0),
+              parent: c.parentTable,
+              residual: num(residual, lang),
+            })),
 
-      technical:
-        `${c.childSchema}.${c.childTable}.${c.childColumn} (${distinct} distinct ` +
-        `values over ${present} non-null rows ` +
-        (plan.kind === 'exact'
-          ? `— every one of them, counted`
-          : `sampled with TABLESAMPLE SYSTEM (${plan.pct.toFixed(4)}%) ` +
-            `REPEATABLE (${plan.seed}) from an estimated ` +
-            `${(c.childRowsEstimated ?? 0).toLocaleString('en-US')}`) +
-        `) matches ${c.parentSchema}.${c.parentTable}.${c.parentColumn} at ` +
-        `${(matchRate * 100).toFixed(1)}%, with ${residual} unmatched (${pct}%)` +
-        (setAside > 0
-          ? `, after setting aside ${setAside} rows sharing a single value ` +
-            `(${(dominantShare * 100).toFixed(1)}% of the ${orphans} that did not match)`
-          : '') +
-        `. No foreign key is declared between them.`,
+      // The technical half stays in one language on purpose: it is the line
+      // a person pastes into a query tool or hands to whoever built the
+      // schema, and `TABLESAMPLE SYSTEM (0.1234%) REPEATABLE (7)` is not a
+      // sentence, it is a reproduction recipe. Only the prose around it moves.
+      technical: T('layer-b.technical', {
+        column: `${c.childSchema}.${c.childTable}.${c.childColumn}`,
+        distinct,
+        present,
+        how:
+          plan.kind === 'exact'
+            ? T('layer-b.how.counted')
+            : T('layer-b.how.sampled', {
+                pct: plan.pct.toFixed(4),
+                seed: plan.seed,
+                estimated: num(c.childRowsEstimated ?? 0, lang),
+              }),
+        parentColumn: `${c.parentSchema}.${c.parentTable}.${c.parentColumn}`,
+        rate: (matchRate * 100).toFixed(1),
+        residual,
+        pct,
+        aside:
+          setAside > 0
+            ? `, after setting aside ${setAside} rows sharing a single value ` +
+              `(${(dominantShare * 100).toFixed(1)}% of the ${orphans} that did not match)`
+            : '',
+      }),
 
       evidence,
       coverage: {
@@ -1037,15 +1060,9 @@ export async function runImplicitForeignKeys(
  * "that is on purpose" as a first-class answer rather than a way of
  * dismissing an alert.
  */
-export function semanticQuestionFor(finding: Finding): string {
-  const table = finding.table;
-  const column = finding.columns[0] ?? 'this column';
-  return (
-    `In ${table}, is ${column} meant to always point at a record that still ` +
-    `exists?\n` +
-    `  • Yes — then the rows I found are leftovers, and worth cleaning up.\n` +
-    `  • No, that is on purpose — then this is not a problem and I will stop ` +
-    `raising it.\n` +
-    `  • I don't know — then it is worth asking whoever built this.`
-  );
+export function semanticQuestionFor(finding: Finding, lang: Lang = 'en'): string {
+  return t(lang, 'layer-b.question', {
+    table: finding.table,
+    column: finding.columns[0] ?? 'this column',
+  });
 }

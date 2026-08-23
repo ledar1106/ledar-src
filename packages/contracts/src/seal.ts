@@ -26,6 +26,9 @@
 
 import { z } from 'zod';
 
+import { t } from './i18n.js';
+import type { Lang } from './i18n.js';
+
 import { assertClaimDiscipline, Finding, ScopeManifest } from './findings.js';
 import type { ClaimOrigin, Confidence, ConfidenceBasis } from './findings.js';
 
@@ -523,23 +526,19 @@ export function assertScopeManifest(input: unknown): ScopeManifest {
  * ANALYZE on this table" became "this table has 0 rows" in the database
  * qualifier, and how "47 of 47 tables" comes to mean nothing at all.
  */
-export function scopeCoverageSentence(scope: ScopeManifest): string {
+export function scopeCoverageSentence(
+  scope: ScopeManifest,
+  lang: Lang = 'en',
+): string {
   const visible = scope.visibleTables;
   const total = scope.totalTables;
 
   if (total === null) {
-    return (
-      `${visible} table${visible === 1 ? '' : 's'} here could be read. How ` +
-      `many exist in total, I do not know — nothing told me, and I am not ` +
-      `going to assume the two numbers are the same.`
-    );
+    return t(lang, 'coverage.no-total', { visible });
   }
 
   if (total === visible) {
-    return (
-      `${visible} of ${total} table${total === 1 ? '' : 's'} could be read — ` +
-      `all of them.`
-    );
+    return t(lang, 'coverage.all', { visible, total });
   }
 
   // "were not looked at", not "cannot be read".
@@ -554,10 +553,5 @@ export function scopeCoverageSentence(scope: ScopeManifest): string {
   // one of the two numbers here. Whoever holds the breakdown can print it;
   // this sentence states only what it measured.
   const unexamined = total - visible;
-  return (
-    `${visible} of ${total} tables could be read. ${unexamined} more ` +
-    `exist${unexamined === 1 ? 's' : ''} in this database that ` +
-    `${unexamined === 1 ? 'was' : 'were'} not looked at; nothing said here ` +
-    `covers ${unexamined === 1 ? 'it' : 'them'}.`
-  );
+  return t(lang, 'coverage.partial', { visible, total, unexamined });
 }
