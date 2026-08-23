@@ -468,11 +468,19 @@ function isInside(parent: string, child: string): boolean {
  * `LOCALAPPDATA`, `XDG_DATA_HOME`, `USERPROFILE` and `HOME` are all read by
  * the product already — the last two through `os.homedir()`.
  */
-function dataDirRedirectedTo(base: string): NodeJS.ProcessEnv {
-  if (process.platform === 'win32') {
+function dataDirRedirectedTo(
+  base: string,
+  // Defaulted rather than read, for the reason `dataDir` itself takes one:
+  // two of these three branches could never run, because a suite only ever
+  // executes on one platform. A branch no test can reach is a branch nobody
+  // has checked against the rule it is supposed to mirror. See
+  // `paths.platform.test.ts`, which asks all three from wherever it runs.
+  platform: NodeJS.Platform = process.platform,
+): NodeJS.ProcessEnv {
+  if (platform === 'win32') {
     return { LOCALAPPDATA: base, USERPROFILE: base };
   }
-  if (process.platform === 'darwin') {
+  if (platform === 'darwin') {
     // macOS reads no variable for this, so the pack lands under
     // `<base>/Library/Application Support`. Still inside `base`, which is all
     // the assertions below ask.
@@ -480,6 +488,8 @@ function dataDirRedirectedTo(base: string): NodeJS.ProcessEnv {
   }
   return { XDG_DATA_HOME: base, HOME: base };
 }
+
+export { dataDirRedirectedTo as packRedirectFor };
 
 /**
  * Every file path the command printed.

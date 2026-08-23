@@ -19,8 +19,10 @@
  * an Evidence Pack — are records of somebody's database.
  */
 
+import { realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 /**
  * The platform's own directory for application data.
@@ -54,4 +56,42 @@ export function ledarDir(
   home: string = homedir(),
 ): string {
   return join(dataDir(platform, env, home), 'ledar');
+}
+
+/**
+ * Whether this module is being run as a command rather than imported.
+ *
+ * Every CLI entry point needs it, because the alternative — calling `main()`
+ * unconditionally at module load — means a test that imports the module to
+ * ask what one of its helpers returns instead RUNS the command: opens the
+ * operator's real history, writes a real file into their real data
+ * directory. The exact accident those helpers exist to describe.
+ *
+ * There were two copies of this, in `export-evidence.ts` and in `diff.ts`,
+ * and the second was mine. Identical logic, except the copy had lost the
+ * comment explaining why `realpathSync` is there — which is how a duplicate
+ * decays into something nobody dares touch.
+ *
+ * `selfUrl` is the caller's `import.meta.url`; `entry` is what the runtime
+ * was pointed at. `entry` is a parameter rather than read here so the
+ * symlink branch below can be reached by a test, which it could not be for as
+ * long as both values came from the process.
+ */
+export function runningAsCommand(
+  selfUrl: string,
+  entry: string | undefined = process.argv[1],
+): boolean {
+  if (entry === undefined) return false;
+
+  const self = fileURLToPath(selfUrl);
+  if (resolve(entry) === self) return true;
+
+  // A shim on PATH, or a checkout reached through a symlinked directory: the
+  // same file spelled differently. `realpathSync` also settles the case of a
+  // Windows drive letter, which a string comparison does not.
+  try {
+    return realpathSync(entry) === realpathSync(self);
+  } catch {
+    return false;
+  }
 }

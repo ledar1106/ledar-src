@@ -26,7 +26,7 @@
  *   npm run export:evidence -- --run 7 --out C:\Users\me\Desktop\pack.json
  */
 
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, parse, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -37,7 +37,7 @@ import {
 } from '@ledar/contracts';
 import type { DatabaseIdentity, RunSummary, ScanStore } from '@ledar/store';
 
-import { dataDir, ledarDir } from './paths.js';
+import { dataDir, ledarDir, runningAsCommand } from './paths.js';
 
 /**
  * Re-exported because this module's own tests reach for it here, and because
@@ -398,39 +398,8 @@ async function main(argv: readonly string[]): Promise<number> {
   return 0;
 }
 
-/**
- * True when this file is the program, false when it is a module somebody read.
- *
- * Without this the two functions above cannot be asked anything. Importing
- * them would run an export: `main` is called the moment this file loads, so a
- * test wanting to know what `defaultOutputFile` returns would instead open the
- * operator's real history and write a real pack into their real data
- * directory — the exact accident those functions exist to describe.
- *
- * Getting this wrong fails as a command that does nothing and says nothing,
- * which is worse than a crash. So it is not left to a promise: every other
- * suite in `export-evidence.test.ts` runs `npm run export:evidence` and reads
- * its exit code and its output, and a guard that stopped recognising its own
- * entry point takes all of them red at once.
- */
-function runningAsCommand(): boolean {
-  const entry = process.argv[1];
-  if (entry === undefined) return false;
 
-  const self = fileURLToPath(import.meta.url);
-  if (resolve(entry) === self) return true;
-
-  // A shim on PATH, or a checkout reached through a symlinked directory: the
-  // same file spelled differently. `realpathSync` also settles the case of a
-  // Windows drive letter, which a string comparison does not.
-  try {
-    return realpathSync(entry) === realpathSync(self);
-  } catch {
-    return false;
-  }
-}
-
-if (runningAsCommand()) {
+if (runningAsCommand(import.meta.url)) {
   main(process.argv.slice(2)).then(
     (code) => process.exit(code),
     (err: unknown) => {

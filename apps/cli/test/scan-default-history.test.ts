@@ -35,6 +35,8 @@ const REPO_ROOT = resolve(HERE, '..', '..', '..');
 const SUITE = 'the default history path, with nobody naming it';
 const SCAN_TIMEOUT_MS = 180_000;
 
+export { dataDirRedirectedTo as historyRedirectFor, expectedLedarDir as historyDirFor };
+
 /**
  * The variables the product already reads to decide where its data lives.
  *
@@ -43,16 +45,19 @@ const SCAN_TIMEOUT_MS = 180_000;
  * about where a history lands, and they are allowed to stop agreeing. If they
  * ever do, that is a fact worth discovering, not a duplication to remove.
  */
-function dataDirRedirectedTo(base: string): NodeJS.ProcessEnv {
-  if (process.platform === 'win32') return { LOCALAPPDATA: base, USERPROFILE: base };
-  if (process.platform === 'darwin') return { HOME: base };
+function dataDirRedirectedTo(
+  base: string,
+  platform: NodeJS.Platform = process.platform,
+): NodeJS.ProcessEnv {
+  if (platform === 'win32') return { LOCALAPPDATA: base, USERPROFILE: base };
+  if (platform === 'darwin') return { HOME: base };
   return { XDG_DATA_HOME: base, HOME: base };
 }
 
 /** Where `ledarDir()` should put things, given the redirect above. */
-function expectedLedarDir(base: string): string {
-  if (process.platform === 'win32') return join(base, 'ledar');
-  if (process.platform === 'darwin') return join(base, 'Library', 'Application Support', 'ledar');
+function expectedLedarDir(base: string, platform: NodeJS.Platform = process.platform): string {
+  if (platform === 'win32') return join(base, 'ledar');
+  if (platform === 'darwin') return join(base, 'Library', 'Application Support', 'ledar');
   return join(base, 'ledar');
 }
 

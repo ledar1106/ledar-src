@@ -29,14 +29,13 @@
  *   npm run diff -- --all
  */
 
-import { realpathSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { HistoryTimeline, diffRuns } from '@ledar/store';
 import type { FindingChange, RunDiff, TimelineEntry } from '@ledar/store';
 
-import { ledarDir } from './paths.js';
+import { ledarDir, runningAsCommand } from './paths.js';
 
 function why(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -253,33 +252,13 @@ function main(argv: readonly string[]): number {
   }
 }
 
-/**
- * Whether this file is being run as a command rather than imported.
- *
- * Same guard, and same reasoning, as `export-evidence.ts`: a test that
- * imports this module to ask what `retiredSiblings` returns must not have
- * opened the operator's real history and printed a diff as a side effect of
- * the import.
- */
-function runningAsCommand(): boolean {
-  const entry = process.argv[1];
-  if (entry === undefined) return false;
-
-  const self = fileURLToPath(import.meta.url);
-  if (resolve(entry) === self) return true;
-  try {
-    return realpathSync(entry) === realpathSync(self);
-  } catch {
-    return false;
-  }
-}
 
 // Re-exported for `apps/cli/test/diff.test.ts`, which pins the file-naming
 // rules this command depends on. They live in @ledar/store now; the test
 // reaching through this module is what keeps the dependency visible.
 export { handlePrefix, retiredSiblings } from '@ledar/store';
 
-if (runningAsCommand()) {
+if (runningAsCommand(import.meta.url)) {
   try {
     process.exit(main(process.argv.slice(2)));
   } catch (err: unknown) {
