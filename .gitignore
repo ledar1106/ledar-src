@@ -21,6 +21,21 @@ build/
 out/
 *.tsbuildinfo
 
+# --- Python bytecode --------------------------------------------------
+# Two Python files ship here (infra/check-secrets.py and the patterns it
+# imports) because CI runs the secret scan in this repository too. Importing
+# a module writes __pycache__ next to it, so the first CI run — or anyone
+# running the scan locally — creates bytecode inside a directory that is
+# otherwise almost entirely off-limits.
+#
+# This was not hypothetical. infra/__pycache__/secret_patterns.cpython-312.pyc
+# reached this repository on 2026-08-23 and stayed. It was not on the
+# allowlist; `git add -A` took it because nothing here excluded it, and the
+# publish gate compared top-level directories rather than full paths, so
+# "infra" being planned made everything under infra/ invisible to it.
+__pycache__/
+*.pyc
+
 # --- editor / OS ------------------------------------------------------
 .DS_Store
 Thumbs.db
