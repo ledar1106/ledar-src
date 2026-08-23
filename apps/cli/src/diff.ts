@@ -29,12 +29,12 @@
  *   npm run diff -- --all
  */
 
-import { existsSync, readdirSync, realpathSync } from 'node:fs';
-import { basename, dirname, join, resolve } from 'node:path';
+import { realpathSync } from 'node:fs';
+import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { RetiredHistoryReader, ScanStore, diffRuns } from '@ledar/store';
-import type { FindingChange, RunDiff, RunSnapshot, RunSummary } from '@ledar/store';
+import { HistoryTimeline, diffRuns } from '@ledar/store';
+import type { FindingChange, RunDiff, TimelineEntry } from '@ledar/store';
 
 import { ledarDir } from './paths.js';
 
@@ -50,168 +50,6 @@ function historyFile(): string {
   return named ? resolve(named) : join(ledarDir(), 'history.db');
 }
 
-// ---- assembling one timeline out of however many files there are -----------
-
-/**
- * A history file that is open, and the way to read a run out of it.
- *
- * The live store and a retired reader are kept apart here rather than behind
- * one interface, because they differ in the one way that matters at the end:
- * only one of them has to be closed carefully, and only one of them can be
- * written to at all.
- */
-type Opened =
-  | { kind: 'live'; path: string; store: ScanStore }
-  | { kind: 'retired'; path: string; reader: RetiredHistoryReader };
-
-type Entry = {
-  /** What the user types to name this run. `7` live, `v1:11` retired. */
-  handle: string;
-  run: RunSummary;
-  from: Opened;
-};
-
-/**
- * The retired siblings of a history file.
- *
- * `retiredName` produces `history.v1.db`, then `history.v1.2.db` if that is
- * taken. Matching on that shape rather than "every .db in the directory"
- * keeps this from adopting a file somebody else put there — and the reader
- * refuses anything that is not a LEDAR history anyway, so a false match costs
- * a skipped file and not a wrong answer.
- */
-function retiredSiblings(live: string): string[] {
-  const dir = dirname(resolve(live));
-  if (!existsSync(dir)) return [];
-
-  const name = basename(live);
-  const dot = name.lastIndexOf('.');
-  const stem = dot > 0 ? name.slice(0, dot) : name;
-  const ext = dot > 0 ? name.slice(dot) : '';
-  const pattern = new RegExp(
-    `^${stem.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\.v\\d+(\\.\\d+)?${ext.replace(/\./g, '\\.')}$`,
-  );
-
-  return readdirSync(dir)
-    .filter((f) => pattern.test(f))
-    .sort()
-    .map((f) => join(dir, f));
-}
-
-/** `history.v1.2.db` → `v1.2`, which is what the user types. */
-function handlePrefix(path: string, live: string): string {
-  const name = basename(path);
-  const stem = basename(live).split('.')[0] ?? '';
-  // `v\\d+(\\.\\d+)?` rather than `v[\\d.]+?` — the lazy version stops at the
-  // first dot, turning `history.v1.2.db` into the handle `v1`, which names a
-  // different file that may also be sitting there.
-  const match = new RegExp(`^${stem}\\.(v\\d+(?:\\.\\d+)?)\\.`).exec(name);
-  return match?.[1] ?? name;
-}
-
-function openAll(live: string): Opened[] {
-  const open: Opened[] = [];
-  if (existsSync(live)) {
-    try {
-      open.push({ kind: 'live', path: live, store: ScanStore.open(live) });
-    } catch {
-      // The history at the live path is from an older schema — the state
-      // between a version bump and the next `npm run scan`, which is when the
-      // user is most likely to want a diff and least likely to get one.
-      //
-      // Read it, do not retire it. `openHistory` would rename the file and
-      // start a fresh one, and this command has no business doing that: the
-      // user asked what changed, not to have their history rotated. The
-      // retired reader takes it read-only and nothing moves.
-      try {
-        open.push({ kind: 'retired', path: live, reader: RetiredHistoryReader.open(live) });
-      } catch {
-        // Not a history this build can read at all. The caller reports the
-        // absence; a second failure raised here would replace a sentence the
-        // user can act on with a stack trace.
-      }
-    }
-  }
-  for (const path of retiredSiblings(live)) {
-    try {
-      open.push({ kind: 'retired', path, reader: RetiredHistoryReader.open(path) });
-    } catch {
-      // A file that looks retired and is not readable as one is skipped, not
-      // fatal. The alternative is a command that stops working because
-      // something unrelated is sitting in the data directory.
-    }
-  }
-  return open;
-}
-
-function closeAll(open: readonly Opened[]): void {
-  for (const o of open) {
-    try {
-      if (o.kind === 'live') o.store.close();
-      else o.reader.close();
-    } catch {
-      // Closing is cleanup. A failure here must not replace whatever the
-      // command was actually reporting.
-    }
-  }
-}
-
-function runsIn(o: Opened, fingerprint: string): RunSummary[] {
-  return o.kind === 'live'
-    ? o.store.runsFor(fingerprint, 200)
-    : o.reader.runsFor(fingerprint, 200);
-}
-
-function snapshotIn(o: Opened, runId: number): RunSnapshot | null {
-  return o.kind === 'live' ? o.store.snapshotOf(runId) : o.reader.snapshotOf(runId);
-}
-
-/**
- * Every run across every file, for one database, oldest first.
- *
- * The fingerprint is settled before anything is listed, because a timeline
- * that mixed two databases would report each one's findings as the other's
- * appearing and disappearing.
- */
-function timeline(open: readonly Opened[], live: string, want: string | null): Entry[] {
-  const fingerprint = want ?? newestFingerprint(open);
-  if (fingerprint === null) return [];
-
-  const entries: Entry[] = [];
-  for (const o of open) {
-    const prefix =
-      o.kind === 'live' || o.path === live ? '' : `${handlePrefix(o.path, live)}:`;
-    for (const run of runsIn(o, fingerprint)) {
-      entries.push({ handle: `${prefix}${run.runId}`, run, from: o });
-    }
-  }
-  entries.sort((a, b) =>
-    a.run.startedAt === b.run.startedAt
-      ? a.run.runId - b.run.runId
-      : a.run.startedAt.localeCompare(b.run.startedAt),
-  );
-  return entries;
-}
-
-/**
- * Which database this history is mostly about.
- *
- * The newest run in any of the files wins. A history that holds two databases
- * — the fixture and the real one, which is the ordinary case on a developer's
- * machine — needs *a* default, and the one they scanned last is the one they
- * are asking about.
- */
-function newestFingerprint(open: readonly Opened[]): string | null {
-  let best: RunSummary | null = null;
-  for (const o of open) {
-    const runs = o.kind === 'live' ? o.store.everyRun(200) : o.reader.runs(200);
-    for (const run of runs) {
-      if (best === null || run.startedAt > best.startedAt) best = run;
-    }
-  }
-  return best?.fingerprint ?? null;
-}
-
 // ---- printing --------------------------------------------------------------
 
 /** `2026-08-22T05:00:44.063Z` → `2026-08-22 05:00`, which is what people read. */
@@ -219,15 +57,13 @@ function when(iso: string): string {
   return `${iso.slice(0, 10)} ${iso.slice(11, 16)}`;
 }
 
-function describe(entry: Entry): string {
+function describe(entry: TimelineEntry): string {
   // The schema version is printed only when it is not the current one. On the
   // ordinary path it is noise; on the path where half the timeline came out of
   // a retired file it is the reason two rows are allowed to disagree.
   const schema =
-    entry.from.kind === 'live'
-      ? ''
-      : ` · schema ${entry.from.reader.source.schemaVersion}`;
-  return `run ${entry.handle}  ${when(entry.run.startedAt)}  ${entry.run.label}  (${basename(entry.from.path)}${schema})`;
+    entry.source.schemaVersion === null ? '' : ` · schema ${entry.source.schemaVersion}`;
+  return `run ${entry.handle}  ${when(entry.run.startedAt)}  ${entry.run.label}  (${basename(entry.source.path)}${schema})`;
 }
 
 const HEADINGS: readonly { verdict: FindingChange['verdict']; title: string }[] = [
@@ -255,7 +91,7 @@ function wrap(text: string, width: number, indent: string): string[] {
   return lines;
 }
 
-function report(diff: RunDiff, from: Entry, to: Entry, showUnchanged: boolean): string[] {
+function report(diff: RunDiff, from: TimelineEntry, to: TimelineEntry, showUnchanged: boolean): string[] {
   const out: string[] = [];
   out.push('');
   out.push(`  Comparing ${to.run.label}`);
@@ -313,7 +149,7 @@ function report(diff: RunDiff, from: Entry, to: Entry, showUnchanged: boolean): 
   return out;
 }
 
-function listing(entries: readonly Entry[]): string[] {
+function listing(entries: readonly TimelineEntry[]): string[] {
   const out = ['', `  ${entries.length} run${entries.length === 1 ? '' : 's'}, oldest first`, ''];
   for (const entry of entries) {
     out.push(`    ${describe(entry)}  ${entry.run.findingCount} finding${entry.run.findingCount === 1 ? '' : 's'}`);
@@ -351,7 +187,7 @@ function parseArgs(argv: readonly string[]): Args {
   return args;
 }
 
-function find(entries: readonly Entry[], handle: string): Entry {
+function find(entries: readonly TimelineEntry[], handle: string): TimelineEntry {
   const found = entries.find((e) => e.handle === handle);
   if (found === undefined) {
     throw new Refused(
@@ -366,17 +202,17 @@ function find(entries: readonly Entry[], handle: string): Entry {
 function main(argv: readonly string[]): number {
   const args = parseArgs(argv);
   const live = historyFile();
-  const open = openAll(live);
+  const history = HistoryTimeline.open(live);
 
   try {
-    if (open.length === 0) {
+    if (history.isEmpty) {
       throw new Refused(
         `There is no scan history at ${live}.\n\n` +
           `  Run \`npm run scan\` at least twice; a comparison needs two runs.`,
       );
     }
 
-    const entries = timeline(open, live, null);
+    const entries = history.entries();
 
     if (args.list) {
       console.log(listing(entries).join('\n'));
@@ -404,8 +240,8 @@ function main(argv: readonly string[]): number {
       );
     }
 
-    const beforeSnapshot = snapshotIn(from.from, from.run.runId);
-    const afterSnapshot = snapshotIn(to.from, to.run.runId);
+    const beforeSnapshot = history.snapshotOf(from.handle);
+    const afterSnapshot = history.snapshotOf(to.handle);
     if (beforeSnapshot === null || afterSnapshot === null) {
       throw new Refused(`One of those runs could not be read back out of its file.`);
     }
@@ -413,7 +249,7 @@ function main(argv: readonly string[]): number {
     console.log(report(diffRuns(beforeSnapshot, afterSnapshot), from, to, args.all).join('\n'));
     return 0;
   } finally {
-    closeAll(open);
+    history.close();
   }
 }
 
@@ -438,7 +274,10 @@ function runningAsCommand(): boolean {
   }
 }
 
-export { handlePrefix, retiredSiblings };
+// Re-exported for `apps/cli/test/diff.test.ts`, which pins the file-naming
+// rules this command depends on. They live in @ledar/store now; the test
+// reaching through this module is what keeps the dependency visible.
+export { handlePrefix, retiredSiblings } from '@ledar/store';
 
 if (runningAsCommand()) {
   try {

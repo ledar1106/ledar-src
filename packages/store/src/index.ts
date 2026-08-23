@@ -11,6 +11,8 @@ export { SCHEMA_VERSION } from './schema.js';
 export { ScanStore } from './store.js';
 export { openHistory, retiredName } from './retire.js';
 export { RetiredHistoryReader } from './legacy.js';
+export { HistoryTimeline, handlePrefix, retiredSiblings } from './timeline.js';
+export type { TimelineEntry } from './timeline.js';
 export { diffRuns } from './diff.js';
 export type {
   Absence,

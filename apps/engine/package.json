@@ -1,0 +1,10 @@
+{
+  "name": "@ledar/engine",
+  "version": "0.0.0",
+  "description": "The LEDAR engine as its own process, behind a loopback HTTP boundary.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "dependencies": {
+    "@ledar/store": "*"
+  }
+}
