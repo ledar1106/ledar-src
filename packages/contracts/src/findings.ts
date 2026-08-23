@@ -357,6 +357,12 @@ export type ScanResult = z.infer<typeof ScanResult>;
 /**
  * Layer B findings are hypotheses until their intent is confirmed, so the
  * words that assert a defect are not available to them.
+ *
+ * "Until confirmed" means two things, and the gate below reads both: the
+ * claim is not `certain`, and the owner has not marked it `confirmed`. Either
+ * one alone lets something through — a `probable` claim escapes a test on
+ * `unconfirmed`, and a claim the owner HAS ruled on should be allowed to say
+ * what it is.
  */
 const FORBIDDEN_IN_UNCONFIRMED = /\b(bug|broken|error|wrong|invalid|corrupt|failure)\b/i;
 
@@ -369,14 +375,32 @@ const FORBIDDEN_IN_UNCONFIRMED = /\b(bug|broken|error|wrong|invalid|corrupt|fail
  * the other two got skipped for a while.
  */
 export function assertClaimDiscipline(finding: Finding): void {
-  if (finding.confidence === 'unconfirmed') {
+  // The condition used to be `confidence === 'unconfirmed'`, which is narrower
+  // than the rule it implements — and narrower in a way nothing would have
+  // shown.
+  //
+  // `sample_extrapolation` has a ceiling of `probable` (CEILING in seal.ts),
+  // so a Layer B rule reading sampled rows may legitimately publish a
+  // `probable` claim. At that moment the word ban stopped applying, silently.
+  // No rule emits `probable` today — every Layer B finding on record is
+  // `unconfirmed`, checked against the scan history and not assumed — so the
+  // hole was latent rather than open. Latent is how a hole is still there
+  // when somebody eventually walks into it.
+  //
+  // AGENTS.md §3 ③ says *chưa xác nhận*: not yet confirmed. The contract
+  // already carries both halves of that. Anything below `certain` is Layer B
+  // territory by the ceiling above, and `userStatus` is where the owner's
+  // ruling is recorded. Once they have said a pattern was not intended, it IS
+  // a defect and the words are theirs to use.
+  if (finding.confidence !== 'certain' && finding.userStatus !== 'confirmed') {
     for (const text of [finding.plainText, finding.technical]) {
       const hit = FORBIDDEN_IN_UNCONFIRMED.exec(text);
       if (hit) {
         throw new Error(
-          `Finding ${finding.id} is unconfirmed but says "${hit[0]}". An ` +
-            `observed pattern is not a defect until the person who owns the ` +
-            `system says it was not intended.`,
+          `Finding ${finding.id} is not confirmed (confidence ` +
+            `\`${finding.confidence}\`, the owner has not ruled on it) but ` +
+            `says "${hit[0]}". An observed pattern is not a defect until the ` +
+            `person who owns the system says it was not intended.`,
         );
       }
     }

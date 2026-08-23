@@ -181,10 +181,10 @@ describe('the seal gate refuses a Layer B claim that speaks with certainty', () 
     assert.match(refused.message, /AGENTS\.md §3 ③/);
 
     // The refusal is NOT the word blacklist. That gate reports "says
-    // <word>", it only runs on unconfirmed claims, and this draft is
+    // <word>", it does not run on `certain` claims, and this draft is
     // certain — so its absence here is what makes this a structural refusal.
     assert.ok(
-      !/is unconfirmed but says/.test(refused.message),
+      !/but says "/.test(refused.message),
       `the refusal came from the prose gate, not the provenance gate:\n` +
         refused.message,
     );
@@ -279,7 +279,7 @@ describe('the seal gate refuses a Layer B claim that speaks with certainty', () 
       }),
     );
 
-    assert.match(refused.message, /is unconfirmed but says "error"/);
+    assert.match(refused.message, /is not confirmed .* but says "error"/);
     assert.match(refused.message, /not a defect until the person who owns the/);
 
     // And it is not the provenance gate: that one never ran, because the
