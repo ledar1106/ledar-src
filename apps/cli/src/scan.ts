@@ -38,6 +38,7 @@ import {
   scopeStripByRule,
   scopeCoverageSentence,
   scopeStripLine,
+  reportVerdict,
 } from '@ledar/contracts';
 import type { Coverage, Finding, ScopeManifest } from '@ledar/contracts';
 import { runLayerA } from '@ledar/packs-layer-a';
@@ -55,6 +56,7 @@ import type {
 } from '@ledar/store';
 
 import { ledarDir } from './paths.js';
+import { wrap } from './text.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '../../..');
@@ -416,10 +418,24 @@ class RunHistory {
 // ---- printing --------------------------------------------------------------
 
 function printFact(f: Finding): void {
-  console.log(`    [${f.severity}] ${f.schema}.${f.table}`);
-  console.log(`    ${f.plainText}`);
+  // The sentence first, the address second.
+  //
+  // This read `[high] public.damaged_slug` on the line above the sentence
+  // until VS-7. A reader who does not build databases meets that line, files
+  // the whole block under "technical, not mine", and the plain sentence
+  // underneath inherits the filing — one of the five could say only that
+  // there was *"an error involving the votes and the posts"* after reading a
+  // report that stated the count, the table and the consequence.
+  //
+  // Nothing here is dropped. `where` keeps the identifier one indent down,
+  // beside the other things a person acts on rather than reads.
+  for (const line of wrap(f.plainText, 68)) console.log(`    ${line}`);
   console.log('');
-  console.log(`      why: ${f.technical}`);
+  console.log(`      where: ${f.schema}.${f.table} (severity: ${f.severity})`);
+  // Wrapped for the same reason the sentence above is. This half is for the
+  // person who will act on it rather than the person deciding whether to,
+  // but a 250-character line is no kinder to them.
+  for (const line of wrap(`why: ${f.technical}`, 66)) console.log(`      ${line}`);
   if (f.evidence) {
     console.log(
       `      ${f.evidence.rowCount} rows · ${f.evidence.durationMs.toFixed(0)}ms`,
@@ -465,15 +481,15 @@ function printSamplingFloor(sampling: {
   const shown = floor < 0.01 ? floor.toFixed(4) : floor.toFixed(2);
 
   console.log('');
-  console.log(
+  const floorLine =
     `      ${sampling.columns} of those columns ` +
       `${sampling.columns === 1 ? 'was' : 'were'} too large to ` +
       `read in full, so ${sampling.columns === 1 ? 'it was' : 'they were'} ` +
       `sampled — the smallest sample was ${sampling.smallestDraw.toLocaleString('en-US')} ` +
       `rows. Broken links rarer than roughly ${shown}% of a table can be missed ` +
       `entirely by a sample that size, so silence about ` +
-      `${sampling.columns === 1 ? 'it' : 'them'} is not the same as a clean bill.`,
-  );
+      `${sampling.columns === 1 ? 'it' : 'them'} is not the same as a clean bill.`;
+  for (const line of wrap(floorLine.trim(), 66)) console.log(`      ${line}`);
 }
 
 /**
@@ -498,20 +514,20 @@ function printEmptyColumns(checked: number, empty: number): void {
 
   console.log('');
   if (empty === checked) {
-    console.log(
-      `      All ${checked} of those had no rows to compare — the tables ` +
-        `holding them are empty. A query ran against each and came back with ` +
-        `nothing, so nothing at all was learned here. An empty table is not a ` +
-        `clean one.`,
-    );
+    const all =
+      `All ${checked} of those had no rows to compare — the tables ` +
+      `holding them are empty. A query ran against each and came back with ` +
+      `nothing, so nothing at all was learned here. An empty table is not a ` +
+      `clean one.`;
+    for (const line of wrap(all, 66)) console.log(`      ${line}`);
     return;
   }
-  console.log(
-    `      ${empty} of those ${checked} had no rows to compare — the ` +
-      `${empty === 1 ? 'table holding it is' : 'tables holding them are'} empty, ` +
-      `so nothing was learned about ${empty === 1 ? 'that one' : 'them'}. An ` +
-      `empty table is not a clean one.`,
-  );
+  const some =
+    `${empty} of those ${checked} had no rows to compare — the ` +
+    `${empty === 1 ? 'table holding it is' : 'tables holding them are'} empty, ` +
+    `so nothing was learned about ${empty === 1 ? 'that one' : 'them'}. An ` +
+    `empty table is not a clean one.`;
+  for (const line of wrap(some, 66)) console.log(`      ${line}`);
 }
 
 /** How many lines of a group are printed before the rest is summarised. */
@@ -548,10 +564,21 @@ function printSetAside(
 }
 
 function printQuestion(f: Finding): void {
-  console.log(`    ${f.schema}.${f.table}.${f.columns[0] ?? ''}`);
-  console.log(`    ${f.plainText}`);
+  // Sentence first, address second — the same swap as `printFact`, and for
+  // the same measured reason. This one mattered more: the Layer B finding is
+  // the only thing on the page a reader is being asked to make a decision
+  // about, and it was introduced by a bare `public.votes.post_id`.
+  //
+  // The text is wrapped here rather than left to the terminal. Unwrapped it
+  // is a single 352-character line, which every surface re-breaks differently
+  // and none of them break into paragraphs. A wall of text is skimmed; a
+  // paragraph is read.
+  for (const line of wrap(f.plainText, 68)) console.log(`    ${line}`);
   console.log('');
-  console.log(`      what I measured: ${f.technical}`);
+  console.log(`      where: ${f.schema}.${f.table}.${f.columns[0] ?? ''}`);
+  for (const line of wrap(`what I measured: ${f.technical}`, 66)) {
+    console.log(`      ${line}`);
+  }
   console.log('');
   for (const line of semanticQuestionFor(f).split('\n')) {
     console.log(`      ${line}`);
@@ -604,17 +631,56 @@ async function main(): Promise<number> {
        * constraint, an index, a candidate column — so the sum is a number of
        * targets rather than a number of findings.
        */
-      const strip = scopeStripLine(
-        buildScopeStrip(manifest, [...layerA.rules, ...layerB.rules]),
-      );
+      // The object as well as the line. `targetsNotChecked` is one of the
+      // three gaps the closing verdict has to name, and re-deriving it from
+      // the rendered sentence would mean parsing our own prose back out.
+      const stripData = buildScopeStrip(manifest, [
+        ...layerA.rules,
+        ...layerB.rules,
+      ]);
+      const strip = scopeStripLine(stripData);
 
-      return { graph, empty, layerA, layerB, strip };
+      return { graph, empty, layerA, layerB, strip, stripData };
     })().catch((err: unknown) => {
       history.failed(err, budget.spend);
       throw err;
     });
 
-    const { graph, empty, layerA, layerB, strip } = measured;
+    const { graph, empty, layerA, layerB, strip, stripData } = measured;
+
+    /**
+     * `abstained` belongs with the negatives, not with the facts.
+     *
+     * Hoisted above the printer because the verdict needs it before the header
+     * is written, and the header is the first thing printed. Getting this
+     * wrong is worse than it looks: `kind !== 'negative'` would have counted
+     * an abstention as something raised, and a report saying *"I checked 40
+     * things and can conclude nothing"* would then arrive at the verdict
+     * written for a report that found something. Debt N8 split the claim kinds
+     * so nothing downstream could read an abstention as a result.
+     */
+    const saysNothingFound = (f: Finding): boolean =>
+      f.kind === 'negative' || f.kind === 'abstained';
+
+    /**
+     * The report's reading of itself, computed once and printed twice.
+     *
+     * Twice for the same reason the scope strip is printed twice, and the
+     * reason is now measured rather than argued: VS-7, 2026-08-23. A reader
+     * given the near-empty report concluded *"most of the database is fine"*
+     * from a scan of 36 tables of which 18 held no rows. Everything they had
+     * to conclude from pointed that way — five reassuring lines to one caveat,
+     * and no conclusion at the end, so they wrote their own.
+     */
+    const conclusion = reportVerdict({
+      raised:
+        layerA.findings.filter((f) => !saysNothingFound(f)).length +
+        layerB.findings.length,
+      tablesTotal: graph.tables.length,
+      tablesEmpty: empty.size,
+      columnsWithNoRows: layerB.columnsWithNoRows,
+      targetsNotChecked: stripData.targetsNotChecked,
+    });
 
     /**
      * What Layer B covered, in the only terms that can be stated honestly.
@@ -715,6 +781,30 @@ async function main(): Promise<number> {
       console.log('       there is no data. Only the structure was examined. A');
       console.log('       clean result on an empty database means nothing was');
       console.log('       looked at — not that everything is fine.');
+    } else if (conclusion.kind === 'silence_with_gaps') {
+      // The one shape where the caveat cannot wait for the end.
+      //
+      // A report that raises nothing spends the next thirty lines saying so in
+      // five reassuring ways, and a reader who skims takes the majority
+      // reading. This is the same verdict printed at the bottom, moved above
+      // the reassurances for the one case where arriving late means arriving
+      // after the reader has already decided. VS-7 measured the cost of it
+      // arriving late: 1 of 5.
+      //
+      // Not printed up here for the other shapes. With a finding on the page
+      // there is no false all-clear to head off, and pre-empting a report the
+      // reader is about to read correctly only teaches them to skip the top.
+      console.log('');
+      console.log(`    ⚠  ${conclusion.headline}`);
+      console.log('');
+      // Numbers here, interpretation only at the bottom. Up here the reader
+      // has not read the report yet, so there is nothing for an
+      // interpretation to attach to - and the sentence it would repeat is
+      // already in Layer B's own boundary line further down.
+      for (const line of conclusion.gaps) {
+        for (const wrapped of wrap(line, 68)) console.log(`       ${wrapped}`);
+        console.log('');
+      }
     } else if (empty.size > 0) {
       console.log(
         `    ${empty.size} of ${graph.tables.length} tables hold no rows — ` +
@@ -735,14 +825,12 @@ async function main(): Promise<number> {
 
     // ---- Layer A ---------------------------------------------------------
     //
-    // `abstained` belongs with the negatives, not with the facts, and getting
-    // that wrong is worse than it looks: `kind !== 'negative'` would have sent
-    // an abstention through `printFact`, which reads `evidence` — a claim with
-    // none, printed under the heading "the counts here are facts". Debt N8
-    // split the two kinds so that nothing downstream could read an abstention
-    // as a result; this is downstream.
-    const saysNothingFound = (f: Finding): boolean =>
-      f.kind === 'negative' || f.kind === 'abstained';
+    // `saysNothingFound` is defined once, above, where the verdict also needs
+    // it. It used to be declared here and the reason is worth keeping: sending
+    // an abstention through `printFact` would read `evidence` off a claim that
+    // has none, and print it under the heading "the counts here are facts".
+    // Debt N8 split the two kinds so nothing downstream could read an
+    // abstention as a result; this is downstream, and so is the verdict.
     const facts = layerA.findings.filter((f) => !saysNothingFound(f));
     const negatives = layerA.findings.filter(saysNothingFound);
 
@@ -757,14 +845,16 @@ async function main(): Promise<number> {
     if (facts.length === 0) {
       for (const n of negatives) {
         if (n.kind !== 'negative' && n.kind !== 'abstained') continue;
-        console.log(`    ${n.plainText}`);
+        for (const line of wrap(n.plainText, 68)) console.log(`    ${line}`);
         console.log('');
         // "but only this far" is the right lead-in for a negative — it caveats
         // a result. An abstention has no result to caveat, so it says what it
         // is instead. The sentence a reader skims has to differ, or the split
         // that debt N8 made in the data never reaches them.
         const lead = n.kind === 'abstained' ? 'and that is all I can say:' : 'but only this far:';
-        console.log(`      ${lead} ${n.boundary}`);
+        for (const line of wrap(`${lead} ${n.boundary}`, 66)) {
+          console.log(`      ${line}`);
+        }
         console.log('');
       }
     } else {
@@ -781,13 +871,13 @@ async function main(): Promise<number> {
     if (layerB.findings.length === 0) {
       console.log('    Nothing stood out.');
       console.log('');
-      console.log(
-        `      but only this far: looked at ${layerB.candidatesConsidered} ` +
-          `column${layerB.candidatesConsidered === 1 ? '' : 's'} whose name suggests ` +
-          `it points at another table, and checked ${layerB.candidatesVerified} of ` +
-          `them against real values. Columns that are named nothing like a ` +
-          `reference were not considered at all.`,
-      );
+      const bound =
+        `but only this far: looked at ${layerB.candidatesConsidered} ` +
+        `column${layerB.candidatesConsidered === 1 ? '' : 's'} whose name suggests ` +
+        `it points at another table, and checked ${layerB.candidatesVerified} of ` +
+        `them against real values. Columns that are named nothing like a ` +
+        `reference were not considered at all.`;
+      for (const line of wrap(bound, 66)) console.log(`      ${line}`);
       printEmptyColumns(layerB.candidatesVerified, layerB.columnsWithNoRows);
       printSamplingFloor(layerB.sampling);
       if (layerB.partitionsCovered > 0) {
@@ -843,6 +933,31 @@ async function main(): Promise<number> {
       console.log('');
     }
 
+    // The conclusion, in the place a reader goes looking for one.
+    //
+    // Printed unconditionally, in every shape of result, for the same reason
+    // the strip is: the moment this becomes a thing some reports have and
+    // others do not, its absence starts carrying a meaning nobody wrote.
+    //
+    // Before VS-7 this section did not exist. The report ran out of things to
+    // say and stopped, and the reader — who needs a conclusion, because a
+    // conclusion is the only part of this they can act on — assembled one out
+    // of whatever was nearest. On the near-empty report that was five
+    // reassuring headlines, and 1 of 5 readers assembled "most of the database
+    // is fine" out of a scan where half the tables held nothing at all.
+    //
+    // The heading is a question about evidence rather than a verdict word.
+    // "SUMMARY" would invite skipping it as a repeat of what is above, and it
+    // is not a repeat: nothing above states what may be concluded.
+    console.log('  ── WHAT THIS REPORT WILL AND WILL NOT SUPPORT ────────────');
+    console.log('');
+    for (const line of wrap(conclusion.headline, 68)) console.log(`    ${line}`);
+    console.log('');
+    for (const line of [...conclusion.gaps, ...conclusion.meaning]) {
+      for (const wrapped of wrap(line, 66)) console.log(`      ${wrapped}`);
+      console.log('');
+    }
+
     // The strip again, below everything it limits.
     //
     // The same line, printed a second time on purpose. `_doc/05` §7: a
@@ -852,6 +967,10 @@ async function main(): Promise<number> {
     // end of the report is exactly the person about to remember "nothing
     // wrong" and forget "in the schemas we pointed it at", so the boundary
     // is the last thing they read as well as the first.
+    //
+    // Directly under the verdict now, rather than floating above the cost
+    // line. That is what §7 actually asks for: the boundary travelling with
+    // the conclusion it bounds, not merely somewhere on the same page.
     console.log(`    ${strip}`);
 
     // Debt N7. The line above adds every rule together, so a rule that ran and

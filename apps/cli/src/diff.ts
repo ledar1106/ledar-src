@@ -36,6 +36,7 @@ import { HistoryTimeline, diffRuns } from '@ledar/store';
 import type { FindingChange, RunDiff, TimelineEntry } from '@ledar/store';
 
 import { ledarDir, runningAsCommand } from './paths.js';
+import { wrap } from './text.js';
 
 function why(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -74,21 +75,6 @@ const HEADINGS: readonly { verdict: FindingChange['verdict']; title: string }[] 
   { verdict: 'unchanged', title: 'Unchanged' },
 ];
 
-function wrap(text: string, width: number, indent: string): string[] {
-  const words = text.split(/\s+/);
-  const lines: string[] = [];
-  let line = '';
-  for (const word of words) {
-    if (line === '') line = word;
-    else if (`${line} ${word}`.length <= width) line = `${line} ${word}`;
-    else {
-      lines.push(indent + line);
-      line = word;
-    }
-  }
-  if (line !== '') lines.push(indent + line);
-  return lines;
-}
 
 function report(diff: RunDiff, from: TimelineEntry, to: TimelineEntry, showUnchanged: boolean): string[] {
   const out: string[] = [];

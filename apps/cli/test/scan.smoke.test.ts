@@ -544,5 +544,63 @@ if (!gate.ok) {
         store.close();
       }
     });
+
+
+    /**
+     * VS-7, 2026-08-23. Two assertions, one measured failure each, and
+     * neither of them pins prose.
+     */
+    it('closes with a verdict, in every shape of result', () => {
+      assert.ok(ran, 'the scan never ran');
+
+      // Before this section existed the report ran out of things to say and
+      // stopped. A reader given the near-empty report supplied the missing
+      // conclusion themselves and got it wrong: "most of the database is
+      // fine", about a scan in which half the tables held no rows.
+      //
+      // Unconditional for the same reason the strip is. The moment some
+      // reports carry a conclusion and others do not, its absence starts
+      // meaning something nobody wrote.
+      const lines = ran.stdout.split(/\r?\n/);
+      const heading = lines.filter((l) => l.includes('WILL AND WILL NOT SUPPORT'));
+
+      assert.equal(
+        heading.length,
+        1,
+        `the verdict section was printed ${heading.length} time(s). This ` +
+          `fixture raises findings, so it takes the 'raised' shape — the ` +
+          `shape most likely to be treated as not needing a conclusion, ` +
+          `because the findings look like one.\n` +
+          `--- stdout (tail) ---\n${lines.slice(-25).join('\n')}`,
+      );
+    });
+
+    it('never opens a finding with a bare identifier', () => {
+      assert.ok(ran, 'the scan never ran');
+
+      // `printFact` and `printQuestion` used to lead with
+      // `[high] public.damaged_slug` and `public.votes.post_id`. A reader who
+      // does not build databases meets that, files the block under
+      // "technical, not mine", and the plain sentence underneath inherits the
+      // filing. One of the five VS-7 readers could afterwards say only that
+      // there was "an error involving the votes and the posts", having read a
+      // report that stated the count, the table and the consequence.
+      //
+      // Structure, not wording. A finding block opens at four spaces; the
+      // identifier now sits at six, behind `where:`. A bare dotted identifier
+      // back at the opening indent means the swap was undone.
+      const offenders = ran.stdout
+        .split(/\r?\n/)
+        .filter((l) => /^ {4}(\[\w+\] )?[a-z_]+\.[a-z_]+(\.[a-z_]+)?\s*$/.test(l));
+
+      assert.deepEqual(
+        offenders,
+        [],
+        `a finding is introduced by an address rather than by what was ` +
+          `found:\n${offenders.join('\n')}\n\nThe address belongs under ` +
+          `"where:", below the sentence. Leading with it is what left a real ` +
+          `reader knowing only that something was wrong somewhere.`,
+      );
+    });
   });
 }
