@@ -104,11 +104,25 @@ def git(args):
 
 
 def tracked_files(staged_only):
+    """File can quet.
+
+    Toan cay = da tracked CONG voi chua tracked ma khong bi gitignore.
+
+    `git ls-files` mot minh chi tra ve file DA TRACKED, nghia la mot file MOI
+    khong duoc quet cho toi sau khi no da duoc commit — dung luc mot secret
+    dan nham de xay ra nhat. Do dung cach cong nay tung xanh hai lan tren
+    chinh `check-secrets.test.sh`: file ay con vo hinh voi `ls-files`.
+
+    File bi gitignore thi bo qua that: chung khong vao git duoc, va quet ca
+    node_modules se lam cong nay cham toi muc khong ai chay.
+    """
     if staged_only:
         r = git(["diff", "--cached", "--name-only", "--diff-filter=ACMR"])
     else:
-        r = git(["ls-files"])
-    return [l.strip().replace(os.sep, "/") for l in (r.stdout or "").splitlines() if l.strip()]
+        r = git(["ls-files", "--cached", "--others", "--exclude-standard"])
+    return sorted(set(
+        l.strip().replace(os.sep, "/") for l in (r.stdout or "").splitlines() if l.strip()
+    ))
 
 
 def path_is_forbidden(rel):
