@@ -44,9 +44,10 @@ import {
   translator,
 } from '@ledar/contracts';
 import type { Coverage, Finding, ScopeManifest } from '@ledar/contracts';
-import { runLayerA } from '@ledar/packs-layer-a';
+import { LAYER_A_RULE_VERSION, runLayerA } from '@ledar/packs-layer-a';
 import {
   IMPLICIT_FK_RULE,
+  LAYER_B_RULE_VERSION,
   runImplicitForeignKeys,
   semanticQuestionFor,
 } from '@ledar/packs-layer-b';
@@ -306,6 +307,10 @@ class RunHistory {
       history.runId = history.store.openRun({
         database: identity,
         scope,
+        // Debt N44. Written so a later reader can explain a history holding
+        // two languages, not so anything can branch on it: identity and the
+        // diff never read prose, and they still do not.
+        lang: LANG,
         // Rule 6: no real data leaves the user's machine, and a sample row
         // written to a file people attach to bug reports has already left.
         // The store defaults this off; it is passed anyway so the choice is
@@ -733,6 +738,22 @@ async function main(): Promise<number> {
       eligible: layerB.candidatesConsidered,
       skipped: layerB.notExamined.map(({ target, reason }) => ({ target, reason })),
       truncatedAt: null,
+      // null: `candidatesConsidered` is already the count of columns whose
+      // NAME suggests a reference, which is this rule's eligibility test, not
+      // what the role can see. Every other column in every readable table is
+      // visible and was never a target, and putting that total here would
+      // answer a question nobody asked with a number that looks like coverage.
+      visibleToRole: null,
+      // Of the columns checked, the ones too large to read end to end. The
+      // sentence about this already existed in the report — "broken links
+      // rarer than roughly 0.03% of a table can be missed entirely" — and the
+      // number behind it was nowhere in the record until now.
+      sampled: layerB.sampling.columns,
+      verified: layerB.candidatesVerified - layerB.sampling.columns,
+      // Looked at, then set aside because the values did not back the guess.
+      // Not `skipped`: those were never examined, and the two lead a reader to
+      // opposite conclusions about whether to go and look themselves.
+      excluded: layerB.ruledOut.length,
     };
 
     history.add([...layerA.findings, ...layerB.findings]);
@@ -764,10 +785,20 @@ async function main(): Promise<number> {
     const layerARuns: RuleRun[] = layerA.rules.map((r) => ({
       rule: r.rule,
       ran: r.ran,
+      // Debt N40. Taken from the pack that owns the rule, never typed here: a
+      // literal would go stale on the first bump, and a history claiming a
+      // version the rule was not running is worse than one claiming none.
+      ruleVersion: LAYER_A_RULE_VERSION,
       coverage: {
         checked: r.checked,
         eligible: r.eligible,
         skipped: [],
+        // Layer A never samples: it counts every offending row up to a
+        // ceiling, and a ceiling is `truncatedAt`, not a sample.
+        visibleToRole: null,
+        verified: r.checked,
+        sampled: 0,
+        excluded: 0,
         truncatedAt: null,
       },
       note:
@@ -782,6 +813,7 @@ async function main(): Promise<number> {
       {
         rule: layerB.findings[0]?.rule ?? LAYER_B_RULE,
         ran: true,
+        ruleVersion: LAYER_B_RULE_VERSION,
         coverage: layerBCoverage,
         note: layerB.budgetExhausted
           ? 'The budget ceiling stopped this rule before it had checked everything.'

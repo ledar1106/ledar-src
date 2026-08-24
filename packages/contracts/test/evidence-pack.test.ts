@@ -40,6 +40,7 @@ import {
   type EvidencePack,
   type RedactedEvidencePack,
 } from '../src/index.js';
+import { coverageOf } from '@ledar/contracts';
 
 // ---------------------------------------------------------------------------
 // the values a real database would have handed us
@@ -161,6 +162,10 @@ function leakyFinding(over: Record<string, unknown> = {}): Record<string, unknow
         },
       ],
       truncatedAt: null,
+      visibleToRole: null,
+      verified: null,
+      sampled: null,
+      excluded: null,
     },
     ...over,
   };
@@ -188,7 +193,7 @@ function negativeFinding(): Record<string, unknown> {
       `Checked 50 of 50 indexes in public — including the one on ` +
       `${REAL.email}. Nothing here covers schemas that were not scanned.`,
     evidence: null,
-    coverage: { checked: 50, eligible: 50, skipped: [], truncatedAt: null },
+    coverage: coverageOf(50, 50),
   };
 }
 
@@ -395,7 +400,7 @@ describe('the gate refuses rather than filters', () => {
       findings: [
         {
           ...negativeFinding(),
-          coverage: { checked: 0, eligible: null, skipped: [], truncatedAt: null },
+          coverage: coverageOf(0, null),
         },
       ],
     });

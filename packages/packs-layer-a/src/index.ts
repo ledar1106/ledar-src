@@ -469,6 +469,12 @@ export async function runLayerA(
         checked: 1,
         eligible: 1,
         skipped: [],
+        // One target, read in full. Layer A counts every offending row up to
+        // its ceiling, so nothing here is ever a sample.
+        visibleToRole: 1,
+        verified: 1,
+        sampled: 0,
+        excluded: 0,
         truncatedAt: capped ? COUNT_LIMIT : null,
       },
     };
@@ -541,6 +547,12 @@ export async function runLayerA(
           checked: 1,
           eligible: 1,
           skipped: [],
+          // One target, read in full. Layer A counts every offending row up to
+          // its ceiling, so nothing here is ever a sample.
+          visibleToRole: 1,
+          verified: 1,
+          sampled: 0,
+          excluded: 0,
           truncatedAt: capped ? COUNT_LIMIT : null,
         },
       };
@@ -659,7 +671,18 @@ export async function runLayerA(
         durationMs: confirmed.durationMs,
         sample: [],
       },
-      coverage: { checked: 1, eligible: 1, skipped: [], truncatedAt: null },
+      coverage: {
+        checked: 1,
+        eligible: 1,
+        skipped: [],
+        truncatedAt: null,
+        // One target, read in full. Layer A counts every offending row up to
+        // its ceiling, so nothing here is ever a sample.
+        visibleToRole: 1,
+        verified: 1,
+        sampled: 0,
+        excluded: 0,
+      },
     };
 
     drafts.push(finding);
@@ -772,6 +795,17 @@ export async function runLayerA(
         eligible: eligibleConstraints,
         skipped: asCoverageSkips(skipped),
         truncatedAt: null,
+        // null, not eligibleConstraints. This rule counts constraints Postgres
+        // was told to keep and never validated; it never counts the validated
+        // ones, so it does not know how many constraints the role can see. A
+        // number here would be the unvalidated count wearing a wider label.
+        visibleToRole: null,
+        // Every one counted in full, and nothing was ruled out — a constraint
+        // this rule declined to check is in `skipped`, which is a different
+        // sentence.
+        verified: constraintsChecked,
+        sampled: 0,
+        excluded: 0,
       },
     });
 
@@ -825,6 +859,14 @@ export async function runLayerA(
         eligible: eligibleIndexes,
         skipped: [],
         truncatedAt: null,
+        // Here the three numbers really are the same one, and saying so is
+        // worth more than leaving it null: this rule reads pg_index, which
+        // shows it exactly the indexes the role may see. Visible, eligible and
+        // checked coincide because nothing sits between them.
+        visibleToRole: eligibleIndexes,
+        verified: eligibleIndexes,
+        sampled: 0,
+        excluded: 0,
       },
     });
   }

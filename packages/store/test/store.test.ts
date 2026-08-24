@@ -10,6 +10,7 @@ import type { Finding, ScopeManifest } from '@ledar/contracts';
 import { SCHEMA_VERSION } from '../src/schema.js';
 import { ScanStore } from '../src/store.js';
 import type { DatabaseIdentity } from '../src/types.js';
+import { coverageOf } from '@ledar/contracts';
 
 const DB: DatabaseIdentity = { host: '127.0.0.1', port: 55432, database: 'pagila' };
 
@@ -52,7 +53,7 @@ function finding(over: Partial<Finding> = {}): Finding {
       durationMs: 1.5,
       sample: [],
     },
-    coverage: { checked: 1, eligible: 1, skipped: [], truncatedAt: null },
+    coverage: coverageOf(1, 1),
     ...over,
   } as Finding;
 }
@@ -291,7 +292,7 @@ test('declared coverage wins over the inferred row', () => {
     {
       rule: 'layer-a/unvalidated-foreign-key-has-orphans',
       ran: true,
-      coverage: { checked: 4, eligible: 6, skipped: [], truncatedAt: null },
+      coverage: coverageOf(4, 6),
     },
   ]);
 
@@ -500,7 +501,7 @@ test('a finding that does not know its denominator survives the round trip', () 
 
   const runId = store.openRun({ database: DB, scope: scope(), startedAt: '2026-08-21T10:00:00Z' });
   store.recordFindings(runId, [
-    finding({ coverage: { checked: 3, eligible: null, skipped: [], truncatedAt: null } }),
+    finding({ coverage: coverageOf(3, null) }),
   ]);
   // `finishedAt` given rather than defaulted. The shared fixture starts a run
   // at 10:00Z on today's date, so a defaulted finish reads the wall clock and
@@ -543,7 +544,7 @@ test('a negative claim with no denominator is refused by the file itself', () =>
           kind: 'negative',
           boundary: 'Checked what could be reached.',
           evidence: null,
-          coverage: { checked: 0, eligible: null, skipped: [], truncatedAt: null },
+          coverage: coverageOf(0, null),
         }),
       ]),
     /CHECK constraint failed|constraint/i,

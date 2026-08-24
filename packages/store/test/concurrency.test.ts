@@ -30,6 +30,7 @@ import type { Finding, ScopeManifest } from '@ledar/contracts';
 
 import { ScanStore } from '../src/store.js';
 import type { DatabaseIdentity } from '../src/types.js';
+import { coverageOf } from '@ledar/contracts';
 
 const DB: DatabaseIdentity = { host: '127.0.0.1', port: 55432, database: 'pagila' };
 const NO_COST = { queries: 0, totalMs: 0, rowsScanned: 0 };
@@ -75,7 +76,7 @@ function finding(): Finding {
     plainText: '3 rows point at a rental record that is not there.',
     technical: 'FK damaged_rental_note_rental_fkey is NOT VALID; 3 orphans.',
     evidence: null,
-    coverage: { checked: 1, eligible: 1, skipped: [], truncatedAt: null },
+    coverage: coverageOf(1, 1),
   } as Finding;
 }
 

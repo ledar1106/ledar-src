@@ -114,33 +114,28 @@ export const VI: Catalog = {
   'history.recorded': (p) =>
     `lịch sử: đã ghi lại thành lần quét số ${s(p, 'run')} trong ${s(p, 'file')}`,
   'history.not-recorded': (p) =>
-    `lịch sử: lần quét này KHÔNG được ghi lại — ${s(p, 'problem')}
-` +
-    `         báo cáo ở trên vẫn có giá trị; chỉ là lần quét sau sẽ không
-` +
+    `lịch sử: lần quét này KHÔNG được ghi lại — ${s(p, 'problem')}\n` +
+    `         báo cáo ở trên vẫn có giá trị; chỉ là lần quét sau sẽ không\n` +
     `         có gì để đối chiếu với nó`,
   'history.unfinished': (p) =>
-    `lịch sử: lần quét số ${s(p, 'run')} trong ${s(p, 'file')} bị bỏ dở —
-` +
-    `         ${s(p, 'problem')}
-` +
-    `         báo cáo ở trên vẫn có giá trị; còn lần quét ấy sẽ được đọc là
-` +
+    `lịch sử: lần quét số ${s(p, 'run')} trong ${s(p, 'file')} bị bỏ dở —\n` +
+    `         ${s(p, 'problem')}\n` +
+    `         báo cáo ở trên vẫn có giá trị; còn lần quét ấy sẽ được đọc là\n` +
     `         chưa hoàn tất, vì đúng là nó chưa hoàn tất`,
+  // Lý do, nói ở dạng chung thay vì cho riêng một bước bump. Câu cũ viện lý do
+  // của bước 1→2 ("định dạng cũ không có chỗ ghi một claim đến từ đâu") — đúng
+  // với schema 1, và SAI ngay khi schema 4 lui schema 3, vì schema 3 có đủ cả
+  // sáu trường xuất xứ.
   'history.moved': (p) =>
-    `lịch sử: file đang nằm sẵn ở đường dẫn đó được ghi bằng lược đồ phiên
-` +
-    `         bản ${s(p, 'version')}, mà bản dựng này không đọc được. Nó đã
-` +
-    `         được DỜI đi, không bị xoá:
-` +
-    `           ${s(p, 'to')}
-` +
-    `         Không byte nào trong đó bị đổi — ${s(p, 'held')}. Không có
-` +
-    `         đường nâng cấp, vì định dạng cũ không có chỗ để ghi một claim
-` +
-    `         đến từ đâu, và bịa ra chỗ ấy còn tệ hơn là bắt đầu lại.`,
+    `lịch sử: file đang nằm sẵn ở đường dẫn đó được ghi bằng lược đồ phiên\n` +
+    `         bản ${s(p, 'version')}, mà bản dựng này không đọc được. Nó đã\n` +
+    `         được DỜI đi, không bị xoá:\n` +
+    `           ${s(p, 'to')}\n` +
+    `         Không byte nào trong đó bị đổi — ${s(p, 'held')}. Không có\n` +
+    `         đường nâng cấp: định dạng mới hỏi mỗi hàng những câu mà hàng cũ\n` +
+    `         chưa bao giờ được hỏi, và cách duy nhất để chuyển chúng sang là\n` +
+    `         bịa ra câu trả lời. Một cuốn lịch sử đầy câu trả lời bịa còn tệ\n` +
+    `         hơn một cuốn bắt đầu lại từ đầu.`,
   'history.holds-runs': (p) => `nó giữ ${s(p, 'runs')} lần quét trước đó`,
   'history.holds-nothing': () => 'nó không giữ lần quét nào',
   'history.holds-uncounted': () => 'không đếm được bên trong nó có gì',
@@ -387,6 +382,26 @@ export const VI: Catalog = {
   'layer-b.how.sampled': (p) =>
     `lấy mẫu bằng TABLESAMPLE SYSTEM (${s(p, 'pct')}%) REPEATABLE ` +
     `(${s(p, 'seed')}) trên ước lượng ${s(p, 'estimated')} dòng`,
+  'layer-b.aside.budget-ceiling': () =>
+    'lần quét đã chạm trần chi phí trên database này',
+  // Giữ nguyên văn câu lỗi của driver bên trong một câu của SẢN PHẨM. Không
+  // dịch phần lỗi: đó là Postgres đang nói, và người ta có thể cần tìm đúng
+  // chuỗi ấy trên mạng.
+  'layer-b.aside.query-failed': (p) => `câu truy vấn thất bại: ${s(p, 'detail')}`,
+  'layer-b.aside.empty-draw': (p) =>
+    `catalog ước lượng ${s(p, 'estimated')} dòng, nên tôi rút ` +
+    `${s(p, 'pct')}% của bảng — và phần rút ra không có gì trong đó. Hoặc ước ` +
+    `lượng cao hơn thực tế rất nhiều, hoặc mẫu rút không may; ở đây không có ` +
+    `gì nói được là cái nào, nên tôi không học được gì về cột này`,
+  'layer-b.aside.one-repeated-value': (p) =>
+    `cả ${s(p, 'orphans')} giá trị không khớp với bản ghi ${s(p, 'parent')} ` +
+    `nào đều là cùng MỘT giá trị, lặp đi lặp lại. Một giá trị lặp nhiều đến ` +
+    `thế đọc ra như thứ schema này dùng để nói "không có" hoặc "tất cả", chứ ` +
+    `không phải chừng ấy liên kết dẫn tới hư không — nên tôi không nêu nó ` +
+    `thành một câu hỏi`,
+  'layer-b.aside.match-rate-too-low': (p) =>
+    `chỉ ${s(p, 'rate')}% giá trị khớp được với ${s(p, 'parent')} — tên trùng ` +
+    `nhau ở đây nhiều khả năng là ngẫu nhiên, không phải một tham chiếu`,
   'layer-b.question': (p) =>
     `Trong ${s(p, 'table')}, ${s(p, 'column')} có buộc phải luôn trỏ tới một ` +
     `bản ghi còn tồn tại không?\n` +

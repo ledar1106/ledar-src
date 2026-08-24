@@ -25,6 +25,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { sealFinding } from '../src/index.js';
+import { coverageOf } from '@ledar/contracts';
 
 const LAYER_B = {
   id: 'layer-b/implicit-fk/public.orders.customer_id',
@@ -42,7 +43,7 @@ const LAYER_B = {
   columns: ['customer_id'],
   technical: '5 of 25 values match no customers row.',
   evidence: { sql: 'SELECT 1', rowCount: 5, sampleSize: 25, durationMs: 1, sample: [] },
-  coverage: { checked: 1, eligible: 1, skipped: [], truncatedAt: null },
+  coverage: coverageOf(1, 1),
 };
 
 function refusalFor(draft: unknown): Error {

@@ -13,7 +13,7 @@
  * database it describes.
  */
 
-import type { Coverage, Finding, ScopeManifest } from '@ledar/contracts';
+import type { Coverage, Finding, Lang, ScopeManifest } from '@ledar/contracts';
 
 /**
  * What a scan cost the database it was pointed at.
@@ -62,6 +62,17 @@ export type RunOutcome = 'running' | 'completed' | 'failed' | 'refused';
 
 export type OpenRunInput = {
   database: DatabaseIdentity;
+  /**
+   * Which language this run's prose was rendered in. Debt N44.
+   *
+   * Optional, defaulting to English, because nothing reads it to decide
+   * anything — identity and the diff never touch prose, so a history holding
+   * both languages compares correctly without it. What it buys is the ability
+   * to EXPLAIN such a history: two runs against one database that read
+   * completely differently, with nothing on the page saying why, is the kind
+   * of gap this project files as a defect before it becomes one.
+   */
+  lang?: Lang;
   /** What the user calls this database. Defaults to `database.database`. */
   label?: string;
   /** ISO-8601. Defaults to now. */
@@ -108,10 +119,36 @@ export type RuleRun = {
   ran: boolean;
   coverage?: Coverage;
   note?: string | null;
+
+  /**
+   * Which release of the rule ran. Debt N40.
+   *
+   * `engineRuleVersion` on a `Finding` already covers a rule that found
+   * something. This covers the case that has no finding to carry it — a rule
+   * that ran and raised nothing — which is the older side of every `appeared`
+   * verdict a diff ever draws. Upgrading a rule produces exactly the picture
+   * of *the old one saw nothing, the new one sees something*, so at the moment
+   * the question "your data or your tool?" is worth most, the diff could only
+   * answer that it did not know.
+   *
+   * Optional, and absent means absent. A version inferred from another rule in
+   * the same package is a fabricated measurement, and the diff's
+   * `rule-version-unknown` is a true answer where a guess would be a false one.
+   */
+  ruleVersion?: string;
 };
 
 export type RunSummary = {
   runId: number;
+  /**
+   * The language the run was rendered in, or null for a history written before
+   * schema 4 recorded it.
+   *
+   * Null is not 'en'. A run from schema 3 was almost certainly English — there
+   * was no other option — but "almost certainly" is a guess, and a guess in a
+   * record is indistinguishable from a measurement once it is written down.
+   */
+  lang: Lang | null;
   databaseId: number;
   fingerprint: string;
   label: string;

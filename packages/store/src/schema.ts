@@ -49,7 +49,7 @@ import type { DatabaseSync } from 'node:sqlite';
  * still there". That is a cost worth paying for a fence; the previous one was
  * not, and was paid anyway.
  */
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 /**
  * The closed vocabularies, copied here on purpose — and tripwired.
@@ -92,6 +92,16 @@ const BASES =
 const EGRESS_CLASSES =
   "'never-leaves', 'customer-system-metadata', 'product-constant'";
 const USER_STATUSES = "'unreviewed', 'confirmed', 'rejected', 'intentional'";
+/**
+ * The languages a run can be rendered in. Debt N44.
+ *
+ * A copy of `LANGS` from contracts, here for the same reason every other list
+ * on this page is: the DDL cannot import TypeScript, so it holds its own copy
+ * and `STORE_VOCABULARY` exposes it to the tripwire test that compares the two.
+ * A copy nobody compares is how two sources of truth drift; a copy something
+ * compares is a fence.
+ */
+const LANGS_SQL = "'en', 'vi'";
 
 /** Every list above, keyed the way the tripwire test reads them. */
 export const STORE_VOCABULARY: Readonly<Record<string, readonly string[]>> = {
@@ -102,6 +112,7 @@ export const STORE_VOCABULARY: Readonly<Record<string, readonly string[]>> = {
   confidenceBasis: BASES.split(',').map((v) => v.trim().replace(/'/g, '')),
   egressClass: EGRESS_CLASSES.split(',').map((v) => v.trim().replace(/'/g, '')),
   userStatus: USER_STATUSES.split(',').map((v) => v.trim().replace(/'/g, '')),
+  lang: LANGS_SQL.split(',').map((v) => v.trim().replace(/'/g, '')),
 };
 
 const DDL: readonly string[] = [
@@ -170,6 +181,21 @@ const DDL: readonly string[] = [
 
     samples_stored INTEGER NOT NULL CHECK (samples_stored IN (0, 1)),
 
+    -- Which language this run's prose was rendered in. Debt N44.
+    --
+    -- Nothing reads it to decide anything, and that is deliberate: identity
+    -- and the diff never touch prose, so a history holding both languages
+    -- compares correctly without this column. What the column buys is the
+    -- ability to EXPLAIN such a history. Opening one and finding two runs
+    -- against the same database that read completely differently, with
+    -- nothing on the page saying why, is the kind of gap this project files
+    -- as a defect even when nothing is wrong yet.
+    --
+    -- DEFAULT 'en' so the column is not a second thing every INSERT has to
+    -- remember, and NOT NULL because "no language" is not a state a rendered
+    -- report can be in.
+    lang TEXT NOT NULL DEFAULT 'en' CHECK (lang IN (${LANGS_SQL})),
+
     CHECK ((outcome = 'running') = (finished_at IS NULL)),
     CHECK (cost_truncated = 1 OR truncation_note IS NULL)
   ) STRICT
@@ -198,6 +224,49 @@ const DDL: readonly string[] = [
     skipped      INTEGER CHECK (skipped IS NULL OR skipped >= 0),
     truncated_at INTEGER,
     note         TEXT,
+
+    -- Which release of the rule ran. Debt N40, and the most common diff case
+    -- there is.
+    --
+    -- engine_rule_version already sits on every finding, which covers a rule
+    -- that FOUND something. It says nothing about a rule that ran and raised
+    -- nothing — and that is exactly the older side of every appeared
+    -- verdict. Upgrading a rule produces precisely the picture of "the old one
+    -- saw nothing, the new one sees something", so at the moment the question
+    -- *"is this your data or your tool?"* is worth most, the diff had to
+    -- answer "cannot say".
+    --
+    -- Nullable, and never inferred. A version guessed from another rule in the
+    -- same package is a fabricated measurement, and rule-version-unknown is
+    -- a true answer where a guess would be a false one.
+    rule_version TEXT,
+
+    -- The coverage split _doc/05 asks for. Debt N1.
+    --
+    -- All four nullable, all four meaning *this rule did not separate these*.
+    -- checked and eligible above are the pair every rule has always been
+    -- able to state; these pull that pair apart, and a rule with nothing
+    -- honest to put here writes NULL rather than a zero that reads as a
+    -- measurement.
+    visible_to_role INTEGER CHECK (visible_to_role IS NULL OR visible_to_role >= 0),
+    verified        INTEGER CHECK (verified IS NULL OR verified >= 0),
+    sampled         INTEGER CHECK (sampled IS NULL OR sampled >= 0),
+    excluded        INTEGER CHECK (excluded IS NULL OR excluded >= 0),
+
+    -- The arithmetic, in the file rather than only in the code that writes to
+    -- it. A row can arrive from a build older than the constraint, from a
+    -- migration, or from somebody with sqlite3 open; the type refuses all of
+    -- them equally.
+    CHECK (
+      verified IS NULL OR sampled IS NULL OR checked IS NULL
+      OR verified + sampled = checked
+    ),
+    CHECK (
+      visible_to_role IS NULL OR eligible IS NULL
+      OR visible_to_role >= eligible
+    ),
+    CHECK (excluded IS NULL OR checked IS NULL OR excluded <= checked),
+
     PRIMARY KEY (run_id, rule)
   ) STRICT
   `,
@@ -296,6 +365,30 @@ const DDL: readonly string[] = [
     coverage_eligible     INTEGER CHECK (coverage_eligible IS NULL OR coverage_eligible >= 0),
     coverage_skipped_json TEXT NOT NULL,
     coverage_truncated_at INTEGER,
+
+    -- Debt N1, on the claim rather than on the run. The same four, and the
+    -- same rule about NULL. The most useful of them here is coverage_sampled
+    -- on a Layer B finding: a column answered from a sample and a column read
+    -- end to end produce the same finding shape, and without this the record
+    -- could not tell a clean full read from a clean sample.
+    coverage_visible_to_role INTEGER
+      CHECK (coverage_visible_to_role IS NULL OR coverage_visible_to_role >= 0),
+    coverage_verified INTEGER
+      CHECK (coverage_verified IS NULL OR coverage_verified >= 0),
+    coverage_sampled INTEGER
+      CHECK (coverage_sampled IS NULL OR coverage_sampled >= 0),
+    coverage_excluded INTEGER
+      CHECK (coverage_excluded IS NULL OR coverage_excluded >= 0),
+
+    CHECK (
+      coverage_verified IS NULL OR coverage_sampled IS NULL
+      OR coverage_verified + coverage_sampled = coverage_checked
+    ),
+    CHECK (
+      coverage_visible_to_role IS NULL OR coverage_eligible IS NULL
+      OR coverage_visible_to_role >= coverage_eligible
+    ),
+    CHECK (coverage_excluded IS NULL OR coverage_excluded <= coverage_checked),
 
     UNIQUE (run_id, finding_key),
 

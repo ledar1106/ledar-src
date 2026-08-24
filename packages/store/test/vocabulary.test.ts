@@ -32,6 +32,7 @@ import {
   Confidence,
   ConfidenceBasis,
   EgressClass,
+  LANGS,
   Severity,
   UserStatus,
 } from '@ledar/contracts';
@@ -47,6 +48,11 @@ const PAIRS: readonly { column: string; contract: readonly string[] }[] = [
   { column: 'confidenceBasis', contract: ConfidenceBasis.options },
   { column: 'egressClass', contract: EgressClass.options },
   { column: 'userStatus', contract: UserStatus.options },
+  // Debt N44. `LANGS` is a plain readonly tuple rather than a zod enum, so it
+  // is passed straight through — the pair only needs a list of strings, and
+  // wrapping it in an enum purely to satisfy the shape of this table would be
+  // a type existing for a test.
+  { column: 'lang', contract: LANGS },
 ];
 
 describe('the store\'s copy of the contract vocabularies', () => {

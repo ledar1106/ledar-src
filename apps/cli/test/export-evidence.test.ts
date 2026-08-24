@@ -118,6 +118,7 @@ import {
   openPagila,
   redactDsn,
 } from '@ledar/test-fixtures';
+import { coverageOf } from '@ledar/contracts';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 
@@ -314,6 +315,10 @@ const OBSERVATION: Finding = {
     eligible: 2,
     skipped: [{ target: 'public.payroll_ledger', reason: PROSE.skipReason }],
     truncatedAt: null,
+    visibleToRole: null,
+    verified: null,
+    sampled: null,
+    excluded: null,
   },
 };
 
@@ -342,7 +347,7 @@ const NEGATIVE: Finding = {
     durationMs: 0.9,
     sample: [],
   },
-  coverage: { checked: 4, eligible: 4, skipped: [], truncatedAt: null },
+  coverage: coverageOf(4, 4),
 };
 
 /**

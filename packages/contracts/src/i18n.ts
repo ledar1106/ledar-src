@@ -188,7 +188,12 @@ export type MessageKey =
   | 'layer-b.technical'
   | 'layer-b.how.counted'
   | 'layer-b.how.sampled'
-  | 'layer-b.question';
+  | 'layer-b.question'
+  | 'layer-b.aside.budget-ceiling'
+  | 'layer-b.aside.query-failed'
+  | 'layer-b.aside.empty-draw'
+  | 'layer-b.aside.one-repeated-value'
+  | 'layer-b.aside.match-rate-too-low';
 
 export type Catalog = Record<MessageKey, (p: Params) => string>;
 

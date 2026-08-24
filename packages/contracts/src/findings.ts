@@ -214,8 +214,141 @@ export const Coverage = z.object({
 
   /** Set when a limit stopped the check early. Silent truncation is a lie. */
   truncatedAt: z.number().int().positive().nullable(),
-});
+
+  // ---- the split `_doc/05` asks for -------------------------------------
+  //
+  // Four refinements, every one of them NULLABLE, and the nullability is the
+  // whole design. `checked` and `eligible` above are the pair every rule has
+  // always been able to state. These four are the pair pulled apart, and a
+  // rule that cannot honestly separate them says null rather than filling in
+  // a number that looks like a measurement.
+  //
+  // That is the same rule `eligible` already follows and for the same reason:
+  // if the only way to express not knowing is to write 0, then not knowing
+  // gets read as a clean result. `GREATEST(reltuples, 0)` turned "nobody has
+  // run ANALYZE" into "this table has 0 rows" once already.
+
+  /**
+   * Targets of this rule's kind that the granted role could see at all.
+   *
+   * The outermost denominator, and the one a role's privileges decide. It sits
+   * above `eligible` because a rule can be inapplicable to something the role
+   * can see perfectly well — an index on a table with no uniqueness rule is
+   * visible and not eligible — and the gap between the two numbers is the
+   * difference between *not my business* and *not allowed to look*.
+   */
+  visibleToRole: z.number().int().nonnegative().nullable(),
+
+  /**
+   * Of `checked`, how many were read in full.
+   *
+   * "Read in full" means every row that could carry the answer was counted.
+   * A verified target that came back clean is clean.
+   */
+  verified: z.number().int().nonnegative().nullable(),
+
+  /**
+   * Of `checked`, how many were answered from a sample.
+   *
+   * Kept apart from `verified` because silence about a sampled target is not
+   * the same claim. Layer B already says this in prose — *"broken links rarer
+   * than roughly 0.03% of a table can be missed entirely by a sample that
+   * size"* — and until now the number behind that sentence was nowhere in the
+   * record, so a later diff could not tell a clean full read from a clean
+   * sample.
+   */
+  sampled: z.number().int().nonnegative().nullable(),
+
+  /**
+   * Targets deliberately set aside, with a reason, having been looked at.
+   *
+   * Not the same as `skipped`. Something in `skipped` was never examined;
+   * something excluded was examined and then ruled out. Reporting the second
+   * as the first overstates what was left undone, and the two lead a reader
+   * to opposite conclusions about whether to go and look themselves.
+   */
+  excluded: z.number().int().nonnegative().nullable(),
+})
+  .superRefine((c, ctx) => {
+    // The arithmetic, checked here rather than trusted, on the same principle
+    // as `assertStripAddsUp`: a coverage record that cannot add up is one no
+    // diff should be built on, and a `Coverage` can arrive from a history
+    // file, a future front end, or a hand-written literal in a test.
+    //
+    // Only checked when BOTH halves were stated. A rule that says nothing is
+    // not making a claim that can be wrong.
+    if (c.verified !== null && c.sampled !== null && c.verified + c.sampled !== c.checked) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['verified'],
+        message:
+          `verified (${c.verified}) + sampled (${c.sampled}) is ` +
+          `${c.verified + c.sampled}, but checked says ${c.checked}. Every ` +
+          `target that was checked took exactly one of the two routes, so ` +
+          `these cannot all be true at once.`,
+      });
+    }
+
+    // `excluded` is a subset of `checked`, not a sibling of it. Layer B says
+    // so in its own docstring — *"these were checked; they are already inside
+    // candidatesVerified"* — and the definition here agrees: something
+    // excluded was looked at and then set aside, which is a thing that
+    // happened to a target that was checked.
+    if (c.excluded !== null && c.excluded > c.checked) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['excluded'],
+        message:
+          `excluded (${c.excluded}) is above checked (${c.checked}). A target ` +
+          `set aside was looked at first, so it cannot be excluded without ` +
+          `having been checked — one of these two was counted over a ` +
+          `population the other was not.`,
+      });
+    }
+
+    if (
+      c.visibleToRole !== null &&
+      c.eligible !== null &&
+      c.visibleToRole < c.eligible
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['visibleToRole'],
+        message:
+          `visibleToRole (${c.visibleToRole}) is below eligible ` +
+          `(${c.eligible}). A rule cannot apply to more targets than the role ` +
+          `can see; if it looks that way, one of the two was counted over a ` +
+          `different population than the other.`,
+      });
+    }
+  });
 export type Coverage = z.infer<typeof Coverage>;
+
+/**
+ * A coverage record with only the pair every rule has always stated.
+ *
+ * The four refinements set to null, which is what they mean: *this rule did
+ * not separate these*. Used by call sites that build a `Coverage` by hand and
+ * have nothing more honest to say, so that adding the fields did not turn into
+ * four zeroes appearing across the codebase — and a zero here is a claim.
+ */
+export function coverageOf(
+  checked: number,
+  eligible: number | null,
+  skipped: readonly { target: string; reason: string }[] = [],
+  truncatedAt: number | null = null,
+): Coverage {
+  return {
+    checked,
+    eligible,
+    skipped: [...skipped],
+    truncatedAt,
+    visibleToRole: null,
+    verified: null,
+    sampled: null,
+    excluded: null,
+  };
+}
 
 /** The query that produced a number, kept so the number can be re-derived. */
 export const Evidence = z.object({
@@ -367,6 +500,28 @@ export type ScanResult = z.infer<typeof ScanResult>;
 const FORBIDDEN_IN_UNCONFIRMED = /\b(bug|broken|error|wrong|invalid|corrupt|failure)\b/i;
 
 /**
+ * The word ban, on any sentence that reaches a reader.
+ *
+ * Lifted out of `assertClaimDiscipline` when debt N42 found the second channel
+ * into the report — `ruledOut` and `notExamined`, which are printed in the
+ * product's voice and were read by no gate at all. A copy of the regex in
+ * `set-aside.ts` would have been a second source of truth for the one rule
+ * this product is least able to afford drifting on.
+ *
+ * `subject` is the clause that goes in front of the complaint, so the error
+ * says which sentence and which rule, rather than only which word.
+ */
+export function assertNoDefectWords(text: string, subject: string): void {
+  const hit = FORBIDDEN_IN_UNCONFIRMED.exec(text);
+  if (hit) {
+    throw new Error(
+      `${subject} but says "${hit[0]}". An observed pattern is not a defect ` +
+        `until the person who owns the system says it was not intended.`,
+    );
+  }
+}
+
+/**
  * One clause of the gate, not the gate.
  *
  * Exported because it is worth reading on its own and worth testing on its
@@ -394,15 +549,11 @@ export function assertClaimDiscipline(finding: Finding): void {
   // a defect and the words are theirs to use.
   if (finding.confidence !== 'certain' && finding.userStatus !== 'confirmed') {
     for (const text of [finding.plainText, finding.technical]) {
-      const hit = FORBIDDEN_IN_UNCONFIRMED.exec(text);
-      if (hit) {
-        throw new Error(
-          `Finding ${finding.id} is not confirmed (confidence ` +
-            `\`${finding.confidence}\`, the owner has not ruled on it) but ` +
-            `says "${hit[0]}". An observed pattern is not a defect until the ` +
-            `person who owns the system says it was not intended.`,
-        );
-      }
+      assertNoDefectWords(
+        text,
+        `Finding ${finding.id} is not confirmed (confidence ` +
+          `\`${finding.confidence}\`, the owner has not ruled on it)`,
+      );
     }
   }
 

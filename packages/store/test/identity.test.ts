@@ -13,6 +13,7 @@ import {
   findingKey,
   structureHash,
 } from '../src/identity.js';
+import { coverageOf } from '@ledar/contracts';
 
 function finding(over: Partial<Finding> = {}): Finding {
   return {
@@ -39,7 +40,7 @@ function finding(over: Partial<Finding> = {}): Finding {
       durationMs: 1.25,
       sample: [],
     },
-    coverage: { checked: 1, eligible: 1, skipped: [], truncatedAt: null },
+    coverage: coverageOf(1, 1),
     ...over,
   } as Finding;
 }

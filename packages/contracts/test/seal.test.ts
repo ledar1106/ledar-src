@@ -22,6 +22,7 @@ import {
   type FindingDraft,
   type ScopeManifest,
 } from '../src/index.js';
+import { coverageOf } from '@ledar/contracts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '../../..');
@@ -57,7 +58,7 @@ function goodObservation(over: Record<string, unknown> = {}): FindingDraft {
       durationMs: 1,
       sample: [],
     },
-    coverage: { checked: 1, eligible: 1, skipped: [], truncatedAt: null },
+    coverage: coverageOf(1, 1),
     ...over,
   } as FindingDraft;
 }
@@ -81,7 +82,7 @@ function goodNegative(over: Record<string, unknown> = {}): FindingDraft {
     technical: 'No unvalidated constraint had violating rows.',
     boundary: 'Checked 12 of 14 constraints in public; 2 were skipped.',
     evidence: null,
-    coverage: { checked: 12, eligible: 14, skipped: [], truncatedAt: null },
+    coverage: coverageOf(12, 14),
     ...over,
   } as FindingDraft;
 }
@@ -238,7 +239,7 @@ describe('C.2 — a negative claim without a boundary is refused at run time', (
         plainText: 'Nothing wrong here.',
         technical: 'No violations.',
         evidence: null,
-        coverage: { checked: 3, eligible: 3, skipped: [], truncatedAt: null },
+        coverage: coverageOf(3, 3),
       }),
     ) as unknown;
 
@@ -258,7 +259,7 @@ describe('C.3 — two denominators, and the right to say "I do not know"', () =>
   test('a negative claim with an unknown denominator is refused', () => {
     const refusal = refusalFrom(
       goodNegative({
-        coverage: { checked: 0, eligible: null, skipped: [], truncatedAt: null },
+        coverage: coverageOf(0, null),
       }),
     );
     assert.match(refusal.message, /denominator is unknown/);
@@ -270,7 +271,7 @@ describe('C.3 — two denominators, and the right to say "I do not know"', () =>
     // was counted. It invalidates only the claim that nothing else exists.
     const sealed = sealFinding(
       goodObservation({
-        coverage: { checked: 1, eligible: null, skipped: [], truncatedAt: null },
+        coverage: coverageOf(1, null),
       }),
       'layer-a',
     );
@@ -281,7 +282,7 @@ describe('C.3 — two denominators, and the right to say "I do not know"', () =>
     const sealed = sealFinding(
       goodNegative({
         boundary: 'There were no unvalidated constraints in public to check.',
-        coverage: { checked: 0, eligible: 0, skipped: [], truncatedAt: null },
+        coverage: coverageOf(0, 0),
       }),
       'layer-a',
     );
@@ -291,7 +292,7 @@ describe('C.3 — two denominators, and the right to say "I do not know"', () =>
   test('checked cannot exceed eligible', () => {
     const refusal = refusalFrom(
       goodObservation({
-        coverage: { checked: 9, eligible: 4, skipped: [], truncatedAt: null },
+        coverage: coverageOf(9, 4),
       }),
     );
     assert.match(refusal.message, /9 checked out of 4 eligible/);
@@ -308,6 +309,10 @@ describe('C.3 — two denominators, and the right to say "I do not know"', () =>
           eligible: 14,
           skipped: [{ target: 'public.a.fk', reason: 'ran out of budget' }],
           truncatedAt: null,
+          visibleToRole: null,
+          verified: null,
+          sampled: null,
+          excluded: null,
         },
       }),
     );
@@ -322,6 +327,10 @@ describe('C.3 — two denominators, and the right to say "I do not know"', () =>
           eligible: 14,
           skipped: [{ target: 'public.a.fk', reason: 'ran out of budget' }],
           truncatedAt: null,
+          visibleToRole: null,
+          verified: null,
+          sampled: null,
+          excluded: null,
         },
       }),
       'layer-a',

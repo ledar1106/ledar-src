@@ -157,6 +157,22 @@ function ruleIn(snapshot: RunSnapshot, rule: string): RuleRun | undefined {
  */
 function ruleVersionIn(snapshot: RunSnapshot, rule: string): string | null {
   if (!snapshot.source.recordsEngineVersion) return null;
+
+  // The coverage row first. Debt N40 added `rule_version` to `run_rule`
+  // precisely because the findings could not answer for a rule that raised
+  // nothing — which is the older side of every `appeared` verdict, and the
+  // single most common thing a diff is asked about.
+  //
+  // Before this, a rule upgrade produced exactly the picture of "the old build
+  // saw nothing, the new one sees something", and the diff had to answer
+  // `rule-version-unknown` at the moment the question "your data or your
+  // tool?" was worth the most.
+  const covered = snapshot.rules.find((r) => r.rule === rule);
+  if (covered?.ruleVersion !== undefined) return covered.ruleVersion;
+
+  // Then the findings, which is where every history before schema 4 kept it.
+  // A retired schema-3 file still answers here, so reading an older history
+  // did not get worse when the newer one got better.
   for (const f of snapshot.findings) {
     if (f.rule === rule && f.engineRuleVersion !== null) return f.engineRuleVersion;
   }

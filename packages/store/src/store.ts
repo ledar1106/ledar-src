@@ -389,8 +389,8 @@ export class ScanStore {
             scope_database, scope_role, scope_schemas,
             scope_visible_tables, scope_total_tables, scope_granted_at,
             scope_read_only_enforced, scope_disclosure,
-            samples_stored
-          ) VALUES (?, ?, NULL, 'running', NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            samples_stored, lang
+          ) VALUES (?, ?, NULL, 'running', NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `,
         )
         .run(
@@ -405,6 +405,7 @@ export class ScanStore {
           scope.readOnlyEnforcedByDatabase ? 1 : 0,
           scope.disclosure,
           storeSamples ? 1 : 0,
+          input.lang ?? 'en',
         );
 
       return Number(inserted.lastInsertRowid);
@@ -456,7 +457,7 @@ export class ScanStore {
     this.tx(() => {
       for (const finding of findings) {
         this.insertFinding(runId, databaseId, finding, storeSamples);
-        this.noteRuleRan(runId, finding.rule);
+        this.noteRuleRan(runId, finding.rule, finding.engineRuleVersion);
       }
     });
   }
@@ -493,8 +494,10 @@ export class ScanStore {
             evidence_sql, evidence_row_count, evidence_sample_size,
             evidence_duration_ms, evidence_sample_json,
             coverage_checked, coverage_eligible, coverage_skipped_json,
-            coverage_truncated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            coverage_truncated_at,
+            coverage_visible_to_role, coverage_verified, coverage_sampled,
+            coverage_excluded
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `,
         )
         .run(
@@ -530,6 +533,10 @@ export class ScanStore {
           coverage.eligible,
           JSON.stringify(coverage.skipped),
           coverage.truncatedAt,
+          coverage.visibleToRole,
+          coverage.verified,
+          coverage.sampled,
+          coverage.excluded,
         );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -545,12 +552,16 @@ export class ScanStore {
     }
   }
 
-  private noteRuleRan(runId: number, rule: string): void {
+  private noteRuleRan(
+    runId: number,
+    rule: string,
+    ruleVersion: string | null,
+  ): void {
     this.db
       .prepare(
         `
-        INSERT INTO run_rule (run_id, rule, ran, note)
-        VALUES (?, ?, 1, ?)
+        INSERT INTO run_rule (run_id, rule, ran, note, rule_version)
+        VALUES (?, ?, 1, ?, ?)
         ON CONFLICT (run_id, rule) DO NOTHING
         `,
       )
@@ -558,6 +569,12 @@ export class ScanStore {
         runId,
         rule,
         'Ran — inferred from a finding it produced. Coverage was never declared.',
+        // Debt N40. This row exists because a finding arrived for a rule
+        // nobody declared coverage for, and that finding states the version it
+        // was produced by. Taking it from there is reading, not inferring —
+        // the alternative is a NULL beside a finding that is holding the
+        // answer, which sends the diff looking for something it already has.
+        ruleVersion,
       );
   }
 
@@ -576,15 +593,23 @@ export class ScanStore {
         this.db
           .prepare(
             `
-            INSERT INTO run_rule (run_id, rule, ran, checked, eligible, skipped, truncated_at, note)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO run_rule (
+              run_id, rule, ran, checked, eligible, skipped, truncated_at, note,
+              rule_version, visible_to_role, verified, sampled, excluded
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (run_id, rule) DO UPDATE SET
-              ran          = excluded.ran,
-              checked      = excluded.checked,
-              eligible     = excluded.eligible,
-              skipped      = excluded.skipped,
-              truncated_at = excluded.truncated_at,
-              note         = excluded.note
+              ran             = excluded.ran,
+              checked         = excluded.checked,
+              eligible        = excluded.eligible,
+              skipped         = excluded.skipped,
+              truncated_at    = excluded.truncated_at,
+              note            = excluded.note,
+              rule_version    = excluded.rule_version,
+              visible_to_role = excluded.visible_to_role,
+              verified        = excluded.verified,
+              sampled         = excluded.sampled,
+              excluded        = excluded.excluded
             `,
           )
           .run(
@@ -596,6 +621,16 @@ export class ScanStore {
             coverage === undefined ? null : coverage.skipped.length,
             coverage === undefined ? null : coverage.truncatedAt,
             entry.note ?? null,
+            // Debt N40. Never defaulted and never inferred: a rule that did
+            // not state its version stores NULL, and the diff says
+            // `rule-version-unknown`, which is true. Filling it in from
+            // another rule in the same package would be a fabricated
+            // measurement wearing the shape of an answer.
+            entry.ruleVersion ?? null,
+            coverage === undefined ? null : coverage.visibleToRole,
+            coverage === undefined ? null : coverage.verified,
+            coverage === undefined ? null : coverage.sampled,
+            coverage === undefined ? null : coverage.excluded,
           );
       }
     });
@@ -831,6 +866,14 @@ function toStoredFinding(row: Row): StoredFinding {
 
   const coverage: Coverage = {
     checked: int(row, 'coverage_checked'),
+    // `intOrNull` on all four, and never coalesced to 0. A stored NULL means
+    // the rule did not separate these; reading it back as a zero would turn
+    // "did not say" into "none", which is the substitution this whole column
+    // family exists to keep out of the record.
+    visibleToRole: intOrNull(row, 'coverage_visible_to_role'),
+    verified: intOrNull(row, 'coverage_verified'),
+    sampled: intOrNull(row, 'coverage_sampled'),
+    excluded: intOrNull(row, 'coverage_excluded'),
     // `intOrNull`, not `int`. A stored NULL means the rule did not know its
     // denominator, and reading that back as 0 would turn "I could not tell
     // how many applied" into "none applied" on the way out of the file.

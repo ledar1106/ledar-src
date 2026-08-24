@@ -26,6 +26,8 @@ import type {
   RuleRun,
   SnapshotSource,
 } from './types.js';
+import { isLang } from '@ledar/contracts';
+import type { Lang } from '@ledar/contracts';
 
 /**
  * The run row plus the two things that are never on it.
@@ -42,7 +44,14 @@ export const RUN_SELECT = `
 `;
 
 export function toRunSummary(row: Row): RunSummary {
+  // Debt N44, read defensively for the same reason `rule_version` is: this
+  // function also runs over retired schema-1, -2 and -3 files, which have no
+  // such column. Absent reads as null — "this file does not say" — never as
+  // 'en', which would be a guess dressed as a record.
+  const langRaw = 'lang' in row ? textOrNull(row, 'lang') : null;
+  const lang: Lang | null = langRaw !== null && isLang(langRaw) ? langRaw : null;
   return {
+    lang,
     runId: int(row, 'id'),
     databaseId: int(row, 'database_id'),
     fingerprint: text(row, 'fingerprint'),
@@ -116,6 +125,11 @@ export function toRuleRun(row: Row): RuleRun {
     ran: bool(row, 'ran'),
     note: textOrNull(row, 'note'),
   };
+  // Debt N40. Absent from schemas 1-3, which is why this is read defensively
+  // rather than with `textOrNull` straight: the retired-history reader runs
+  // this same function over files that have no such column.
+  const version = 'rule_version' in row ? textOrNull(row, 'rule_version') : null;
+  if (version !== null) entry.ruleVersion = version;
   // Coverage is only reconstructed when it was actually declared. The
   // skipped *targets* are not kept here — only how many there were — so
   // the array is empty and `checked`/`eligible` carry the meaning.
@@ -125,6 +139,13 @@ export function toRuleRun(row: Row): RuleRun {
       eligible,
       skipped: [],
       truncatedAt: intOrNull(row, 'truncated_at'),
+      // Debt N1, and read the same defensive way: a schema-1 or schema-2 file
+      // has none of these columns, and a reader that assumed them would throw
+      // on exactly the histories the retirement path exists to keep readable.
+      visibleToRole: 'visible_to_role' in row ? intOrNull(row, 'visible_to_role') : null,
+      verified: 'verified' in row ? intOrNull(row, 'verified') : null,
+      sampled: 'sampled' in row ? intOrNull(row, 'sampled') : null,
+      excluded: 'excluded' in row ? intOrNull(row, 'excluded') : null,
     };
     if (skipped !== null && skipped > 0) {
       const said = `${skipped} targets were skipped; the reasons are on the findings.`;

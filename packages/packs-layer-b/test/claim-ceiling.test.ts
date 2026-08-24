@@ -59,6 +59,7 @@ import { describe, it } from 'node:test';
 
 import { ClaimRefused, sealFinding, type FindingDraft } from '@ledar/contracts';
 import { IMPLICIT_FK_RULE, LAYER_B_RULE_VERSION } from '@ledar/packs-layer-b';
+import { coverageOf } from '@ledar/contracts';
 
 const PRODUCER = 'layer-b';
 
@@ -109,7 +110,7 @@ function draft(over: Partial<FindingDraft> = {}): FindingDraft {
       durationMs: 4,
       sample: [],
     },
-    coverage: { checked: 1, eligible: 1, skipped: [], truncatedAt: null },
+    coverage: coverageOf(1, 1),
 
     ...over,
   } as FindingDraft;

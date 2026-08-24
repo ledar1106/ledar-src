@@ -27,8 +27,8 @@ import {
   type RuleCoverage,
   type SealedFinding,
 } from '@ledar/contracts';
-import { num, t, translator } from '@ledar/contracts';
-import type { Lang, Translate } from '@ledar/contracts';
+import { num, sealSetAside, t, translator } from '@ledar/contracts';
+import type { Lang, SealedSetAside, Translate } from '@ledar/contracts';
 
 /**
  * Which release of Layer B's detection rule produced a claim.
@@ -547,17 +547,25 @@ export type NotExaminedCause = 'budget_ceiling' | 'query_failed' | 'sample_came_
  */
 export type RuledOutCause = 'match_rate_too_low' | 'unmatched_is_one_repeated_value';
 
-/** A candidate no query was run against. */
-export type NotExaminedTarget = {
-  target: string;
-  reason: string;
+/**
+ * A candidate no query was run against.
+ *
+ * `SealedSetAside`, not a bare `{ target, reason }`. Debt N42: both of these
+ * lists are printed into the report in the product's voice, and until schema 4
+ * no gate read a word of them. The brand makes the gate unavoidable the way
+ * `SealedFinding` does for a claim — an object literal does not satisfy this
+ * type, so a new push site cannot skip `sealSetAside` by forgetting it.
+ *
+ * `cause` stays outside the seal because nothing prints it. It is this pack's
+ * own label for grouping the report, and the gate has no opinion about a
+ * string no reader sees.
+ */
+export type NotExaminedTarget = SealedSetAside & {
   cause: NotExaminedCause;
 };
 
 /** A candidate that was queried, and whose values did not back the guess. */
-export type RuledOutTarget = {
-  target: string;
-  reason: string;
+export type RuledOutTarget = SealedSetAside & {
   cause: RuledOutCause;
 };
 
@@ -672,6 +680,26 @@ export async function runImplicitForeignKeys(
   graph: SchemaGraph,
   budget: QueryBudget,
   lang: Lang = 'en',
+  /**
+   * The sampling seed, for a caller that needs the draw to be reproducible.
+   *
+   * The default IS the production behaviour, so nothing changes unless a
+   * caller opts in — the CLI never passes this.
+   *
+   * It exists because of debt N45. The regression bench asserts that a block
+   * sample of `damaged_wide_link` lands near the table's true 30% unmatched
+   * share, and with a seed off the clock that is one draw from a spread: the
+   * assertion goes red roughly once in a long while with nothing broken. A
+   * suite that mandates `0 fail` and contains a test that fails by chance
+   * teaches people to re-run until green, which is exactly how a real red gets
+   * waved through.
+   *
+   * A seam rather than a fixed seed in the source. Pinning the seed here would
+   * make every scan everywhere draw the same blocks forever — a permanent
+   * blind spot instead of a random one, which is the quieter version of the
+   * bug block sampling replaced.
+   */
+  seed: number = Date.now() % 1_000_000,
 ): Promise<LayerBOutcome> {
   const T: Translate = translator(lang);
   const candidates = findCandidates(graph);
@@ -682,10 +710,8 @@ export async function runImplicitForeignKeys(
 
   // One seed for the whole run, so every sampled column in one report was
   // drawn under the same conditions and two of them can be compared. It
-  // changes between runs on purpose: a seed fixed in the source would draw the
-  // same blocks of the same tables forever, which is a quieter version of the
-  // bug this replaced — a permanent blind spot instead of a systematic one.
-  const seed = Date.now() % 1_000_000;
+  // changes between runs on purpose — see the parameter's docstring for why
+  // that default is not a fixed number, and why it is a parameter at all.
 
   // Tracked so the report can disclose the weakest look it took. See the
   // `sampling` field on LayerBOutcome for why a silence after a sample is not
@@ -699,8 +725,7 @@ export async function runImplicitForeignKeys(
 
     if (!budget.canAfford(target)) {
       notExamined.push({
-        target,
-        reason: 'the scan reached its ceiling on this database',
+        ...sealSetAside({ target, reason: T('layer-b.aside.budget-ceiling') }),
         cause: 'budget_ceiling',
       });
       continue;
@@ -747,8 +772,16 @@ export async function runImplicitForeignKeys(
       // belongs here, unexamined: a column nobody could read is not a column
       // that came back clean.
       notExamined.push({
-        target,
-        reason: err instanceof Error ? err.message : String(err),
+        // The driver's own message, passed through rather than translated.
+        // It is not this product's sentence: it is Postgres speaking, and
+        // rewording it would put our voice on a string somebody may need to
+        // search for verbatim.
+        ...sealSetAside({
+          target,
+          reason: T('layer-b.aside.query-failed', {
+            detail: err instanceof Error ? err.message : String(err),
+          }),
+        }),
         cause: 'query_failed',
       });
       continue;
@@ -779,13 +812,13 @@ export async function runImplicitForeignKeys(
       // this cannot be counted as a target that was checked. It is the
       // coverage hole, which is precisely what `notExamined` is for.
       notExamined.push({
-        target,
-        reason:
-          `the catalog estimates ${(c.childRowsEstimated ?? 0).toLocaleString('en-US')} ` +
-          `rows, so ${plan.pct.toFixed(4)}% of the table was drawn — and that ` +
-          `came back with nothing in it. Either the estimate is far too high ` +
-          `or the sample was unlucky; nothing here can tell you which, so ` +
-          `nothing here is claiming this column is clean`,
+        ...sealSetAside({
+          target,
+          reason: T('layer-b.aside.empty-draw', {
+            estimated: num(c.childRowsEstimated ?? 0, lang),
+            pct: plan.pct.toFixed(4),
+          }),
+        }),
         cause: 'sample_came_back_empty',
       });
       continue;
@@ -818,13 +851,13 @@ export async function runImplicitForeignKeys(
 
     if (oneValueDominates && residual === 0) {
       ruledOut.push({
-        target,
-        reason:
-          `all ${orphans.toLocaleString('en-US')} values that match no ` +
-          `${c.parentTable} record are the same single value, repeated. One ` +
-          `value that many times reads as something this schema uses to mean ` +
-          `"none" or "all", not as that many broken links — so this is not ` +
-          `being raised as a question`,
+        ...sealSetAside({
+          target,
+          reason: T('layer-b.aside.one-repeated-value', {
+            orphans: num(orphans, lang),
+            parent: c.parentTable,
+          }),
+        }),
         cause: 'unmatched_is_one_repeated_value',
       });
       continue;
@@ -835,8 +868,13 @@ export async function runImplicitForeignKeys(
       // Checked, and then let go. The query ran, the values were counted, and
       // the count is what says no — so this is a result, not a gap.
       ruledOut.push({
-        target,
-        reason: `only ${(matchRate * 100).toFixed(0)}% of values line up with ${c.parentTable} — the name matching is probably a coincidence, not a reference`,
+        ...sealSetAside({
+          target,
+          reason: T('layer-b.aside.match-rate-too-low', {
+            rate: (matchRate * 100).toFixed(0),
+            parent: c.parentTable,
+          }),
+        }),
         cause: 'match_rate_too_low',
       });
       continue;
@@ -1004,6 +1042,15 @@ export async function runImplicitForeignKeys(
         checked: 1,
         eligible: 1,
         skipped: [],
+        visibleToRole: 1,
+        // The split this rule most needed. A column answered from a sample and
+        // a column read end to end produce the same finding shape, and until
+        // now the record could not tell them apart — so a later diff could not
+        // tell a clean full read from a clean sample, which are not the same
+        // claim about the same column.
+        verified: plan.kind === 'exact' ? 1 : 0,
+        sampled: plan.kind === 'exact' ? 0 : 1,
+        excluded: 0,
         // Nothing was truncated. A sample is not a count that stopped early —
         // it is a different measurement, and `evidence.sampleSize` is the
         // field that says so. Reusing `truncatedAt` for it would print

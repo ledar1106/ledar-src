@@ -29,6 +29,7 @@ import type {
   RunSnapshot,
   SnapshotSource,
 } from '../src/types.js';
+import { coverageOf } from '@ledar/contracts';
 
 const FINGERPRINT = 'a'.repeat(64);
 const OTHER_FINGERPRINT = 'b'.repeat(64);
@@ -87,6 +88,7 @@ function snapshot(over: SnapOver = {}): RunSnapshot {
   return {
     source: over.source ?? MODERN,
     run: {
+      lang: null,
       runId: over.runId ?? 1,
       databaseId: 1,
       fingerprint: over.fingerprint ?? FINGERPRINT,
@@ -117,7 +119,11 @@ function snapshot(over: SnapOver = {}): RunSnapshot {
 }
 
 function covered(checked: number, eligible: number) {
-  return { checked, eligible, skipped: [], truncatedAt: null };
+  // Delegates rather than repeating the shape. When Coverage grew the four
+  // fields of debt N1, a literal here would have had to grow them too — and a
+  // test fixture that has to be edited every time a type changes is a fixture
+  // that gets edited carelessly.
+  return coverageOf(checked, eligible);
 }
 
 /** The later of two runs, so `startedAt` orders the way the argument order does. */
@@ -403,5 +409,81 @@ describe('how the report is ordered and what it carries', () => {
     // of writing a second, drifting copy of the caveats.
     assert.ok(d.identityLimits.length > 0);
     assert.ok(d.identityLimits.some((l) => /renamed table/i.test(l)));
+  });
+});
+
+describe('a rule version on the coverage row — debt N40', () => {
+  /**
+   * The most common thing a diff is ever asked, and the one it could not
+   * answer.
+   *
+   * `engineRuleVersion` lives on findings, so a rule that FOUND something
+   * carries its version. A rule that ran and raised nothing carried nothing —
+   * and that is precisely the older side of every `appeared` verdict. Upgrading
+   * a detection rule produces exactly the picture of "the old build saw
+   * nothing, the new one sees something", so at the moment the question *your
+   * data or your tool?* is worth the most, the diff had to answer that it did
+   * not know.
+   */
+  const appeared = (beforeVersion?: string) =>
+    diffRuns(
+      snapshot({
+        findings: [],
+        rules: [
+          {
+            rule: ORPHANS,
+            ran: true,
+            coverage: covered(5, 5),
+            note: null,
+            ...(beforeVersion === undefined ? {} : { ruleVersion: beforeVersion }),
+          },
+        ],
+      }),
+      later({
+        findings: [finding()],
+        rules: [
+          {
+            rule: ORPHANS,
+            ran: true,
+            coverage: covered(5, 5),
+            note: null,
+            ruleVersion: 'layer-a@1.0.0',
+          },
+        ],
+      }),
+    ).changes[0]!;
+
+  it('cannot attribute an appearance when the old side recorded no version', () => {
+    // Unchanged behaviour, kept as the baseline the fix is measured against.
+    const c = appeared();
+    assert.equal(c.verdict, 'appeared');
+    assert.equal(c.comparability, 'rule-version-unknown');
+  });
+
+  it('attributes it to the data when both sides ran the same rule version', () => {
+    const c = appeared('layer-a@1.0.0');
+    assert.equal(c.verdict, 'appeared');
+    assert.equal(c.comparability, 'like-for-like');
+  });
+
+  it('attributes it to the rule when the version moved', () => {
+    // The answer that was unreachable before. A finding appearing across a
+    // rule upgrade is now labelled as ours rather than left ambiguous, which
+    // is the difference between a report a person can act on and one they
+    // have to go and check by hand.
+    const c = appeared('layer-a@0.9.0');
+    assert.equal(c.verdict, 'appeared');
+    assert.equal(c.comparability, 'rule-changed');
+  });
+
+  it('still reads the version off a finding when the coverage row has none', () => {
+    // Every history written before schema 4 keeps the version only on
+    // findings. Reading a retired file did not get worse when the current one
+    // got better.
+    const d = diffRuns(
+      snapshot({ findings: [finding()] }),
+      later({ findings: [finding()] }),
+    );
+    assert.equal(d.changes[0]?.comparability, 'like-for-like');
   });
 });

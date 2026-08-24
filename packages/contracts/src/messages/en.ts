@@ -101,35 +101,32 @@ export const EN: Catalog = {
   'history.recorded': (p) =>
     `history: recorded as run ${s(p, 'run')} in ${s(p, 'file')}`,
   'history.not-recorded': (p) =>
-    `history: this run was NOT recorded — ${s(p, 'problem')}
-` +
-    `         the report above stands; there is just nothing for the next
-` +
+    `history: this run was NOT recorded — ${s(p, 'problem')}\n` +
+    `         the report above stands; there is just nothing for the next\n` +
     `         scan to compare it against`,
   'history.unfinished': (p) =>
-    `history: run ${s(p, 'run')} in ${s(p, 'file')} was left unfinished —
-` +
-    `         ${s(p, 'problem')}
-` +
-    `         the report above stands; that run will read as incomplete,
-` +
+    `history: run ${s(p, 'run')} in ${s(p, 'file')} was left unfinished —\n` +
+    `         ${s(p, 'problem')}\n` +
+    `         the report above stands; that run will read as incomplete,\n` +
     `         because it is`,
+  // The reason, stated generally rather than for one bump.
+  //
+  // This used to say the older format had no room for where a claim came from.
+  // True of schema 1, which predates provenance — and false the moment schema
+  // 3 was retired by schema 4, because schema 3 carries all six provenance
+  // fields. A message that explains a decision with a reason that stopped
+  // being true is worse than one that explains nothing: it teaches the reader
+  // something about the product that is not so.
   'history.moved': (p) =>
-    `history: the file already at that path was written by schema version
-` +
-    `         ${s(p, 'version')}, which this build cannot read. It has been
-` +
-    `         MOVED, not deleted:
-` +
-    `           ${s(p, 'to')}
-` +
-    `         Nothing in it was changed — ${s(p, 'held')}. There is no
-` +
-    `         upgrade path, because the older format has no room for where a
-` +
-    `         claim came from, and inventing that would be worse than
-` +
-    `         starting fresh.`,
+    `history: the file already at that path was written by schema version\n` +
+    `         ${s(p, 'version')}, which this build cannot read. It has been\n` +
+    `         MOVED, not deleted:\n` +
+    `           ${s(p, 'to')}\n` +
+    `         Nothing in it was changed — ${s(p, 'held')}. There is no\n` +
+    `         upgrade path: the newer format asks each row questions the old\n` +
+    `         rows were never asked, and the only way to migrate them is to\n` +
+    `         invent the answers. A history full of invented answers is worse\n` +
+    `         than a history that starts again.`,
   'history.holds-runs': (p) =>
     `it holds ${s(p, 'runs')} earlier ${plural(n(p, 'runs'), 'run', 'runs')}`,
   'history.holds-nothing': () => 'it held no runs',
@@ -394,6 +391,26 @@ export const EN: Catalog = {
   'layer-b.how.sampled': (p) =>
     `sampled with TABLESAMPLE SYSTEM (${s(p, 'pct')}%) REPEATABLE ` +
     `(${s(p, 'seed')}) from an estimated ${s(p, 'estimated')}`,
+  'layer-b.aside.budget-ceiling': () =>
+    'the scan reached its ceiling on this database',
+  // The driver's own words are kept verbatim inside a sentence that is ours.
+  // Passing the raw message straight through made this key render identically
+  // in both languages, which the catalogue test correctly refuses: a message
+  // that is the same in every language is not a message, it is a parameter.
+  'layer-b.aside.query-failed': (p) => `the query failed: ${s(p, 'detail')}`,
+  'layer-b.aside.empty-draw': (p) =>
+    `the catalog estimates ${s(p, 'estimated')} rows, so ${s(p, 'pct')}% of ` +
+    `the table was drawn — and that came back with nothing in it. Either the ` +
+    `estimate is far too high or the sample was unlucky; nothing here can ` +
+    `tell you which, so nothing was learned about this column`,
+  'layer-b.aside.one-repeated-value': (p) =>
+    `all ${s(p, 'orphans')} values that match no ${s(p, 'parent')} record are ` +
+    `the same single value, repeated. One value that many times reads as ` +
+    `something this schema uses to mean "none" or "all", not as that many ` +
+    `links that lead nowhere — so this is not being raised as a question`,
+  'layer-b.aside.match-rate-too-low': (p) =>
+    `only ${s(p, 'rate')}% of values line up with ${s(p, 'parent')} — the ` +
+    `name matching is probably a coincidence, not a reference`,
   'layer-b.question': (p) =>
     `In ${s(p, 'table')}, is ${s(p, 'column')} meant to always point at a ` +
     `record that still exists?\n` +

@@ -1000,31 +1000,93 @@ if (!gate.ok) {
         );
       });
 
-      it('lands near the real rate, which the old shape never could', () => {
-        const f = outcome.findings.find((x) => x.table === WIDE.table)!;
-        assert.ok(f.evidence, `${WIDE.table} produced no evidence to read`);
-        const rate = f.evidence.rowCount / f.evidence.sampleSize!;
+      /**
+       * Debt N45, and the reason this reads as five draws rather than one.
+       *
+       * It used to assert that THE draw — whichever one the clock handed out
+       * — landed inside a band around the table's true 30%. That is one
+       * observation of a random variable, and block sampling has real spread:
+       * rows inside a block are neighbours, so a draw can legitimately sit
+       * well off the true share. The assertion went red once with nothing
+       * broken, and a suite that mandates `0 fail` while containing a test
+       * that fails by chance teaches people to re-run until green. That habit
+       * is how a real red gets waved through.
+       *
+       * Fixed seeds here; the clock still picks the seed in production. What
+       * varies between runs is the thing being measured, so pinning it in the
+       * test makes the test deterministic without making the product blind —
+       * a seed fixed in the SOURCE would draw the same blocks of the same
+       * tables forever, which is the quieter version of the bug this
+       * replaced.
+       *
+       * The property is unbiasedness, and one draw is a poor test of it. Five
+       * spread seeds test it directly: every one lands clear of zero, and
+       * their mean lands near the truth. The old `LIMIT 10000` with no
+       * ORDER BY would read the clean head of this table under EVERY seed and
+       * return ~0%, so the first assertion is the one that catches the
+       * regression this rule exists to prevent.
+       */
+      const SEEDS = [1, 200_003, 400_007, 600_011, 999_983];
 
-        // A band, not a number. This is a sample: the draw moves between
-        // runs, and a test pinning an exact figure would be pinning the seed
-        // rather than the rule. The band is wide because block sampling is
-        // block sampling — rows inside one block are neighbours, so the
-        // spread is real and is not being hidden here.
+      it('lands near the real rate under every seed, not just a lucky one', async () => {
+        const draws: { seed: number; rate: number; rows: number }[] = [];
+
+        for (const seed of SEEDS) {
+          const run = await runImplicitForeignKeys(
+            client,
+            graph,
+            new QueryBudget(),
+            'en',
+            seed,
+          );
+          const f = run.findings.find((x) => x.table === WIDE.table);
+          assert.ok(
+            f?.evidence,
+            `${WIDE.table} produced no evidence under seed ${seed}`,
+          );
+          draws.push({
+            seed,
+            rate: f.evidence.rowCount / f.evidence.sampleSize!,
+            rows: f.evidence.sampleSize!,
+          });
+        }
+
+        const shown = draws
+          .map((d) => `${d.seed}: ${(d.rate * 100).toFixed(1)}% of ${d.rows}`)
+          .join(', ');
+
+        // The regression guard. The old shape read the head of the table,
+        // which is 42,000 clean rows, so it came back near zero every time.
+        for (const d of draws) {
+          assert.ok(
+            d.rate > 0.1,
+            `seed ${d.seed} sampled an unmatched share of ` +
+              `${(d.rate * 100).toFixed(1)}% from a table that is ` +
+              `${WIDE.orphanShare} unmatched. A draw that low means the sample ` +
+              `is reaching the clean head of the table again.\n  ${shown}`,
+          );
+        }
+
+        // And the centre, which one draw could not have shown. Tighter than
+        // the old single-draw band precisely because averaging five of them
+        // is what makes it affordable.
+        const mean = draws.reduce((a, d) => a + d.rate, 0) / draws.length;
         assert.ok(
-          rate > 0.15 && rate < 0.45,
-          `${WIDE.table} sampled an unmatched share of ${(rate * 100).toFixed(1)}%. ` +
-            `The table is ${WIDE.orphanShare} unmatched overall, and a block ` +
-            `sample should land near it. Far below suggests the draw is ` +
-            `reaching the clean head of the table again.`,
+          mean > 0.22 && mean < 0.38,
+          `five seeds average ${(mean * 100).toFixed(1)}% unmatched against a ` +
+            `true share of ${WIDE.orphanShare}. The estimator is off centre, ` +
+            `which no single draw would have told you.\n  ${shown}`,
         );
 
-        assert.ok(
-          f.evidence.sampleSize! > 1000,
-          `only ${f.evidence.sampleSize} rows came back from a table of ` +
-            `${WIDE.rows}. The percentage is derived from reltuples, so a ` +
-            `sample this small means the estimate has drifted — run ANALYZE ` +
-            `on ${WIDE.table}.`,
-        );
+        for (const d of draws) {
+          assert.ok(
+            d.rows > 1000,
+            `only ${d.rows} rows came back under seed ${d.seed} from a table ` +
+              `of ${WIDE.rows}. The percentage is derived from reltuples, so a ` +
+              `sample this small means the estimate has drifted — run ANALYZE ` +
+              `on ${WIDE.table}.`,
+          );
+        }
       });
     });
 
