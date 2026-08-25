@@ -19,6 +19,8 @@ import type { DatabaseSync } from 'node:sqlite';
 import { absentOrText, bool, int, intOrNull, json, text, textOrNull } from './rows.js';
 import type { Row } from './rows.js';
 import type {
+  LlmCallOutcome,
+  LlmCallRow,
   RecordedFinding,
   RunOutcome,
   RunSnapshot,
@@ -116,6 +118,33 @@ export function toRecordedFinding(row: Row): RecordedFinding {
  * mappings that round `checked` differently would decide "fixed" versus "not
  * looked at" differently depending on which file the run came from.
  */
+/**
+ * One `llm_call` row, as it comes back out — HS-D D.4.
+ *
+ * Beside `toRuleRun` rather than inside `store.ts` for the reason that one is
+ * here: a second mapping of the same table, written later by whoever needed to
+ * read it from somewhere else, is how two readers come to disagree about what
+ * a null meant.
+ */
+export function toLlmCall(row: Row): LlmCallRow {
+  return {
+    id: int(row, 'id'),
+    runId: intOrNull(row, 'run_id'),
+    at: text(row, 'at'),
+    tier: text(row, 'tier'),
+    model: text(row, 'model'),
+    outcome: text(row, 'outcome') as LlmCallOutcome,
+    cacheHit: bool(row, 'cache_hit'),
+    // `intOrNull`, never `int`. Reading an absent token count as 0 here would
+    // undo in one line the distinction the whole table is shaped to keep.
+    promptTokens: intOrNull(row, 'prompt_tokens'),
+    completionTokens: intOrNull(row, 'completion_tokens'),
+    costMicros: intOrNull(row, 'cost_micros'),
+    priceBasis: textOrNull(row, 'price_basis'),
+    note: textOrNull(row, 'note'),
+  };
+}
+
 export function toRuleRun(row: Row): RuleRun {
   const checked = intOrNull(row, 'checked');
   const eligible = intOrNull(row, 'eligible');

@@ -302,3 +302,59 @@ export type RunSnapshot = {
   findings: RecordedFinding[];
   rules: RuleRun[];
 };
+
+/**
+ * How one call to a model ended — HS-D D.4.
+ *
+ * A copy of `LlmCallOutcome` in `@ledar/contracts`, held here for the same
+ * reason every other vocabulary in this package is: the store has no runtime
+ * dependency on contracts, and `vocabulary.test.ts` compares the two at test
+ * time. A copy nobody compares is how two sources of truth drift.
+ */
+export type LlmCallOutcome = 'ok' | 'failed' | 'refused';
+
+/**
+ * One call to a model, on the way in.
+ *
+ * Every count is optional and every optional one means *there is nothing to
+ * count*, never *zero*. `recordLlmCall` writes `null` for an absent value and
+ * never `0`, and the DDL refuses the combinations that would let the two read
+ * alike.
+ */
+export type LlmCallInput = {
+  /** Null for a call that belonged to no scan — onboarding asks first. */
+  runId: number | null;
+  /** ISO-8601. Defaults to now. */
+  at?: string;
+  /** The tier that was asked for. Free text; the tier list belongs to D.1. */
+  tier: string;
+  /** What actually answered, as the provider named it. */
+  model: string;
+  outcome: LlmCallOutcome;
+  /** True when nothing was contacted. */
+  cacheHit: boolean;
+  promptTokens?: number | null;
+  completionTokens?: number | null;
+  /** Millionths of a unit of currency, so no float rounds anybody's bill. */
+  costMicros?: number | null;
+  /** Which price list produced `costMicros`. Required whenever it is present. */
+  priceBasis?: string | null;
+  /** Why it failed or was refused. Required unless the outcome is `ok`. */
+  note?: string | null;
+};
+
+/** One call as the history holds it. */
+export type LlmCallRow = {
+  id: number;
+  runId: number | null;
+  at: string;
+  tier: string;
+  model: string;
+  outcome: LlmCallOutcome;
+  cacheHit: boolean;
+  promptTokens: number | null;
+  completionTokens: number | null;
+  costMicros: number | null;
+  priceBasis: string | null;
+  note: string | null;
+};

@@ -39,6 +39,7 @@ import {
   scopeCoverageSentence,
   scopeStripLine,
   reportVerdict,
+  emptyTablesLine,
   langFromEnv,
   num,
   translator,
@@ -877,11 +878,18 @@ async function main(): Promise<number> {
         console.log('');
       }
     } else if (empty.size > 0) {
-      for (const line of wrap(
-        T('scan.tables-empty-line', { empty: empty.size, total: graph.tables.length }),
-        68,
-      )) {
-        console.log(`    ${line}`);
+      // Through the same function as the verdict's own gap line, not a second
+      // copy of the same decision. The two print one fact in two places, and a
+      // reader who meets it once as "half of them" and once as "18 of 36" has
+      // been shown two facts and given no way to tell which to believe.
+      const line = emptyTablesLine(
+        { plain: 'scan.tables-empty-line', withShare: 'scan.tables-empty-line.share' },
+        empty.size,
+        graph.tables.length,
+        LANG,
+      );
+      for (const wrapped of wrap(line, 68)) {
+        console.log(`    ${wrapped}`);
       }
     }
     console.log('');

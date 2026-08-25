@@ -48,8 +48,30 @@ import type { DatabaseSync } from 'node:sqlite';
  * is "somebody's history stops being compared against, loudly, and the file is
  * still there". That is a cost worth paying for a fence; the previous one was
  * not, and was paid anyway.
+ *
+ * 3 → 4, four debts at once — N40 (`rule_version` on `run_rule`), N1 (four
+ * nullable coverage columns), N42, N44 (`lang` on `run`). One bump rather than
+ * four, because the cost of a bump is per-bump and not per-column.
+ *
+ * ⚠️ That entry is written here on 2026-08-24, after the fact. The bump landed
+ * on 2026-08-23 and nobody added a paragraph, so this list read 1 → 2 → 3 for
+ * a file already at 4. A version history that skips a version is worse than no
+ * version history: it invites the next reader to conclude the missing bump was
+ * not a real one.
+ *
+ * 4 → 5, `llm_call` — HS-D D.4. A new table rather than new columns, so no
+ * existing row changes shape, and a schema-4 file is still perfectly readable
+ * by `RetiredHistoryReader` (its `REQUIRED` list does not mention this table).
+ * The bump is still owed: this store refuses any version it does not speak,
+ * deliberately and with no migrator (debt N4), and *"it would probably work"*
+ * is not the standard that refusal was built to hold.
+ *
+ * Paid now rather than when the first call happens, and that IS the feature —
+ * D.4's acceptance criterion is *measure from day one*. A cost table added
+ * after the bills start arriving can only describe spending from the day
+ * somebody noticed, and the interesting spending is always earlier.
  */
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 /**
  * The closed vocabularies, copied here on purpose — and tripwired.
@@ -103,6 +125,16 @@ const USER_STATUSES = "'unreviewed', 'confirmed', 'rejected', 'intentional'";
  */
 const LANGS_SQL = "'en', 'vi'";
 
+/**
+ * How one call to a model ended. HS-D D.4, a copy of `LlmCallOutcome`.
+ *
+ * `refused` is in here because a run with no calls is otherwise ambiguous —
+ * nothing needed asking, or everything was declined at the boundary — and a
+ * product that promises to say what it did not do cannot store those two the
+ * same way.
+ */
+const LLM_OUTCOMES_SQL = "'ok', 'failed', 'refused'";
+
 /** Every list above, keyed the way the tripwire test reads them. */
 export const STORE_VOCABULARY: Readonly<Record<string, readonly string[]>> = {
   kind: KINDS.split(',').map((v) => v.trim().replace(/'/g, '')),
@@ -113,6 +145,7 @@ export const STORE_VOCABULARY: Readonly<Record<string, readonly string[]>> = {
   egressClass: EGRESS_CLASSES.split(',').map((v) => v.trim().replace(/'/g, '')),
   userStatus: USER_STATUSES.split(',').map((v) => v.trim().replace(/'/g, '')),
   lang: LANGS_SQL.split(',').map((v) => v.trim().replace(/'/g, '')),
+  llmCallOutcome: LLM_OUTCOMES_SQL.split(',').map((v) => v.trim().replace(/'/g, '')),
 };
 
 const DDL: readonly string[] = [
@@ -409,6 +442,90 @@ const DDL: readonly string[] = [
   /** The read path of a diff: one finding, every run it appeared in. */
   `
   CREATE INDEX finding_history ON finding (database_id, finding_key, run_id)
+  `,
+
+  /**
+   * One call to a model, and what it cost. HS-D D.4.
+   *
+   * Written before anything can call a model, which is the acceptance
+   * criterion rather than eagerness: a cost table added after the bills start
+   * arriving can only describe spending from the day somebody noticed.
+   *
+   * ## The CHECKs are the point of this table
+   *
+   * Four of them, and each one refuses a row that would read as a measurement
+   * without being one:
+   *
+   *   cost without a basis   a number derived from a price list, with nothing
+   *                          saying which list. Nobody can re-derive it, and
+   *                          it will be quoted years later as though measured.
+   *                          Same failure as a message explaining itself with
+   *                          a reason that expired (AGENTS section 4.9 point 3).
+   *   refused with tokens    'refused' means nothing was sent. A token count
+   *                          on such a row is a count of something that did
+   *                          not happen.
+   *   cache hit that failed  a cache hit contacted nobody, so there was
+   *                          nothing to fail.
+   *   failed/refused, no note  the whole product turns on being able to say
+   *                          WHY it did not do a thing.
+   *
+   * ## Null is not zero, and the columns are shaped so it cannot be read as one
+   *
+   *   tokens NULL   nothing was sent, so there is nothing to count
+   *   tokens 0      nothing was sent AND we know why — a cache hit
+   *   cost   NULL   nothing was sent, or no price list covered this model
+   *   cost   0      it was sent and it was free
+   *
+   * `run_id` is nullable because not every call happens inside a scan —
+   * onboarding asks before there is anything to scan, and a cost record that
+   * could only exist inside a run would quietly omit the earliest calls.
+   *
+   * `tier` and `model` are free text on purpose. Every other closed vocabulary
+   * here is a CHECK with a tripwire, and these two are not: the tier list
+   * belongs to D.1's configuration and D.1 does not exist. A fence around a
+   * decision nobody has made is not a fence. Validating a tier against the
+   * config is the client's job at the moment it reads the config; this table
+   * records what happened, including a tier the client should have refused.
+   */
+  `
+  CREATE TABLE llm_call (
+    id      INTEGER PRIMARY KEY,
+    run_id  INTEGER REFERENCES run(id) ON DELETE CASCADE,
+    at      TEXT NOT NULL,
+
+    tier    TEXT NOT NULL,
+    model   TEXT NOT NULL,
+
+    outcome TEXT NOT NULL CHECK (outcome IN (${LLM_OUTCOMES_SQL})),
+
+    cache_hit INTEGER NOT NULL CHECK (cache_hit IN (0, 1)),
+
+    prompt_tokens     INTEGER CHECK (prompt_tokens     IS NULL OR prompt_tokens     >= 0),
+    completion_tokens INTEGER CHECK (completion_tokens IS NULL OR completion_tokens >= 0),
+
+    cost_micros INTEGER CHECK (cost_micros IS NULL OR cost_micros >= 0),
+    price_basis TEXT,
+
+    note TEXT,
+
+    -- A cost may be absent. A cost may not be present without the price list
+    -- that produced it.
+    CHECK (cost_micros IS NULL OR price_basis IS NOT NULL),
+
+    -- 'refused' means nothing was sent, so there is nothing to have counted.
+    CHECK (outcome <> 'refused' OR (prompt_tokens IS NULL AND completion_tokens IS NULL)),
+
+    -- A cache hit contacted nobody. There was nothing to fail or to refuse.
+    CHECK (cache_hit = 0 OR outcome = 'ok'),
+
+    -- Not saying why it went wrong is the one thing this product may not do.
+    CHECK (outcome = 'ok' OR (note IS NOT NULL AND note <> ''))
+  ) STRICT
+  `,
+
+  /** The read path: what one run spent. */
+  `
+  CREATE INDEX llm_call_by_run ON llm_call (run_id, at)
   `,
 ];
 

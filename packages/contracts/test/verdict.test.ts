@@ -75,6 +75,21 @@ describe('the verdict a reader concludes from', () => {
     assert.match(said, /\b36\b/);
   });
 
+  it('states how big the gap is instead of leaving it as a division', () => {
+    // The other half of the same VS-7 failure, and the half the counts alone
+    // never fixed: `18` and `36` were both printed, and the fact they were
+    // there to convey — that this is HALF the database — was not. A reader
+    // skimming a page about their own system does not stop to divide.
+    assert.match(reportVerdict(REPORT_B).gaps.join(' '), /half of them/);
+
+    // And it stays quiet where the counts already say it. Eight of thirty-six
+    // read as "a few" leads the reader to the same decision; a magnitude
+    // clause on every report is a clause that stops being read.
+    const few = reportVerdict({ ...REPORT_B, tablesEmpty: 8 });
+    assert.doesNotMatch(few.gaps.join(' '), / of them —/);
+    assert.match(few.gaps.join(' '), /8 of the 36 tables/);
+  });
+
   it('separates the counts from what they mean', () => {
     const v = reportVerdict(REPORT_B);
 

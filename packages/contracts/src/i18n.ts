@@ -86,6 +86,7 @@ export type MessageKey =
   | 'scan.every-table-empty'
   | 'scan.every-table-empty.body'
   | 'scan.tables-empty-line'
+  | 'scan.tables-empty-line.share'
   | 'scan.facts-are-facts'
   | 'scan.patterns-preamble'
   | 'scan.nothing-stood-out'
@@ -124,8 +125,73 @@ export type MessageKey =
   | 'verdict.raised'
   | 'verdict.raised.meaning'
   | 'verdict.gap.empty-tables'
+  | 'verdict.gap.empty-tables.share'
   | 'verdict.gap.empty-columns'
   | 'verdict.gap.not-checked'
+  // ---- how big a count is against its whole ----
+  //
+  // Quantities, not sentences. They are interpolated into the two lines that
+  // report empty tables, so that a reader is told the magnitude instead of
+  // being handed the division that produces it. See share.ts.
+  | 'share.quarter'
+  | 'share.third'
+  | 'share.half'
+  | 'share.two-thirds'
+  | 'share.three-quarters'
+  | 'share.almost-all'
+  | 'share.all'
+  // ---- what the model step did not add ----
+  //
+  // HS-D D.5. Both name what is MISSING and neither grades what is present;
+  // `assertDoesNotDisparage` in model-step.ts is run over both by its test.
+  | 'model.unavailable'
+  | 'model.declined'
+  | 'model.addition-heading'
+  // ---- a bounded answer, rendered by the product ----
+  //
+  // The model returns identifiers; these are the sentences. Adding a market
+  // is adding these keys to one more catalogue, which `Catalog` refuses to
+  // compile without — rather than adding a banned-word list in a language
+  // nobody on the team reads. See bounded-answer.ts.
+  | 'answer.rests-on'
+  | 'answer.cannot'
+  | 'answer.missing.who'
+  | 'answer.missing.when'
+  | 'answer.missing.why'
+  | 'answer.missing.which_rows'
+  | 'answer.missing.impact'
+  | 'answer.missing.elsewhere'
+  // ---- a bounded RULE, read back before it runs ----
+  //
+  // VS-6. The model picked a check and a target; these are the words. This is
+  // the only control standing in the one door `sealRule` cannot close — a
+  // well-formed check pointed at the wrong table — so it is read by the
+  // person who typed the sentence, in the language they typed it in.
+  | 'rule.will-check.points-at-an-existing-row'
+  | 'rule.will-check.is-never-missing'
+  | 'rule.will-check.is-never-repeated'
+  | 'rule.will-check.stays-within-its-usual-set'
+  | 'rule.cannot'
+  | 'rule.unsupported.needs_a_number'
+  | 'rule.unsupported.needs_time'
+  | 'rule.unsupported.needs_meaning'
+  | 'rule.unsupported.needs_another_system'
+  | 'rule.unsupported.not_about_rows'
+  | 'rule.unsupported.names_nothing_here'
+  // ---- what one fact IS, for the person reading the answer ----
+  //
+  // 🟥 `EvidenceFact.label` is English on purpose — a model reads it inside
+  // the fence. These are the same facts named for the READER, and they exist
+  // because the first Vietnamese answer came out with English labels inside
+  // it. A half-translated sentence is worse than an untranslated one.
+  | 'fact.column'
+  | 'fact.what-the-scan-says'
+  | 'fact.confidence'
+  | 'fact.how-measured'
+  | 'fact.rows-examined'
+  | 'fact.sampling'
+  | 'fact.targets-checked'
+  | 'fact.boundary'
   // ---- the scope strip ----
   | 'strip.tables-visible'
   | 'strip.tables-visible-no-total'

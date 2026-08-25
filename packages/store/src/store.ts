@@ -37,6 +37,7 @@ import type { Row } from './rows.js';
 import {
   RUN_SELECT,
   readRunSnapshot,
+  toLlmCall,
   toRuleRun,
   toRunSummary,
 } from './snapshot.js';
@@ -44,6 +45,8 @@ import type {
   DatabaseIdentity,
   FinishRunInput,
   FindingHistoryEntry,
+  LlmCallInput,
+  LlmCallRow,
   OpenRunInput,
   RuleRun,
   RunOutcome,
@@ -757,6 +760,73 @@ export class ScanStore {
       .prepare(`SELECT * FROM finding WHERE run_id = ? ORDER BY id`)
       .all(runId);
     return rows.map((row) => toStoredFinding(row));
+  }
+
+  /**
+   * Records one call to a model — HS-D D.4.
+   *
+   * Not inside `requireOpenRun`, and that is deliberate rather than an
+   * oversight. A call can happen before any scan exists (onboarding asks first)
+   * and a call can be REFUSED, which is a thing worth recording precisely when
+   * no run got far enough to open. Tying the cost record to an open run would
+   * lose exactly the calls somebody would most want to find later.
+   *
+   * Everything this refuses, it refuses in the DDL rather than here — see the
+   * CHECKs on `llm_call`. A validate() in this method would be skipped by the
+   * second writer of this store, and the second writer is the one at 2am.
+   */
+  recordLlmCall(call: LlmCallInput): number {
+    return this.tx(() => {
+      const info = this.db
+        .prepare(
+          `
+          INSERT INTO llm_call (
+            run_id, at, tier, model, outcome, cache_hit,
+            prompt_tokens, completion_tokens, cost_micros, price_basis, note
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `,
+        )
+        .run(
+          call.runId ?? null,
+          isoTime(call.at, 'at'),
+          call.tier,
+          call.model,
+          call.outcome,
+          call.cacheHit ? 1 : 0,
+          // `?? null` and never `?? 0`. A token count of zero says nothing was
+          // sent AND we know why; null says there is nothing to count. The
+          // whole product turns on not letting those two read alike.
+          call.promptTokens ?? null,
+          call.completionTokens ?? null,
+          call.costMicros ?? null,
+          call.priceBasis ?? null,
+          call.note ?? null,
+        );
+      return Number(info.lastInsertRowid);
+    });
+  }
+
+  /** What one run spent, oldest call first. */
+  llmCallsOf(runId: number): LlmCallRow[] {
+    return this.db
+      .prepare(`SELECT * FROM llm_call WHERE run_id = ? ORDER BY id`)
+      .all(runId)
+      .map((row) => toLlmCall(row));
+  }
+
+  /**
+   * Every call in this history, including the ones that belonged to no run.
+   *
+   * Separate from `llmCallsOf` rather than a default argument, because
+   * `llmCallsOf(undefined)` returning everything is the kind of API where a
+   * missing variable quietly bills the whole file.
+   */
+  everyLlmCall(limit = 500): LlmCallRow[] {
+    return this.db
+      .prepare(`SELECT * FROM llm_call ORDER BY id DESC LIMIT ?`)
+      .all(limit)
+      .map((row) => toLlmCall(row));
   }
 
   rulesOf(runId: number): RuleRun[] {

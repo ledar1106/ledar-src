@@ -40,6 +40,9 @@ const EVERY_PARAM: Params = {
   // them here makes the function-word check below fail on the fixture rather
   // than on the catalogue — which is a test reporting its own arguments.
   enforcement: '<<enforcement>>',
+  // `share` is one of them: shareInWords() renders it through this same
+  // catalogue before it is interpolated.
+  share: '<<share>>',
   empty: 18,
   total: 36,
   checked: 12,

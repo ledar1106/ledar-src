@@ -58,6 +58,10 @@ export const VI: Catalog = {
   'scan.tables-empty-line': (p) =>
     `${s(p, 'empty')} trong ${s(p, 'total')} bảng không có dòng nào — các ` +
     `luật đọc dữ liệu không nói được gì về những bảng đó`,
+  'scan.tables-empty-line.share': (p) =>
+    `${s(p, 'empty')} trong ${s(p, 'total')} bảng (${s(p, 'share')} số bảng ` +
+    `ở đây) không có dòng nào — các luật đọc dữ liệu không nói được gì về ` +
+    `những bảng đó`,
 
   'scan.facts-are-facts': () =>
     'Các con số ở đây là sự thật — chạy lại một câu truy vấn là ra đúng từng ' +
@@ -179,6 +183,10 @@ export const VI: Catalog = {
     `${s(p, 'empty')} trong ${s(p, 'total')} bảng không có dòng nào. Tôi có ` +
     `chạy truy vấn và không nhận được gì, nên ở đó tôi không học được điều ` +
     `gì — theo cả hai chiều.`,
+  'verdict.gap.empty-tables.share': (p) =>
+    `${s(p, 'empty')} trong ${s(p, 'total')} bảng — ${s(p, 'share')} số bảng ` +
+    `ở đây — không có dòng nào. Tôi có chạy truy vấn và không nhận được gì, ` +
+    `nên ở đó tôi không học được điều gì — theo cả hai chiều.`,
   'verdict.gap.empty-columns': (p) =>
     `${s(p, 'count')} cột mà một luật đọc dữ liệu đang nhắm tới lại không có ` +
     `dòng nào để đối chiếu. Những cột đó không sạch mà cũng không bẩn; tôi ` +
@@ -186,6 +194,92 @@ export const VI: Catalog = {
   'verdict.gap.not-checked': (p) =>
     `${s(p, 'count')} mục tiêu mà một luật có quyền kiểm nhưng đã không ` +
     `kiểm. Chúng được nêu tên ở trên, kèm lý do từng cái.`,
+
+  // ---- một con số lớn cỡ nào so với cái toàn thể của nó ----
+  //
+  // Đây là LƯỢNG, không phải câu. Chúng luôn được ghép vào một câu ở trên,
+  // không bao giờ in một mình.
+  'share.quarter': () => 'một phần tư',
+  'share.third': () => 'một phần ba',
+  'share.half': () => 'một nửa',
+  'share.two-thirds': () => 'hai phần ba',
+  'share.three-quarters': () => 'ba phần tư',
+  'share.almost-all': () => 'gần như toàn bộ',
+  'share.all': () => 'toàn bộ',
+
+  // ---- thứ bước mô hình đã KHÔNG thêm vào ----
+  //
+  // Mỗi câu nêu PHẦN THÊM còn thiếu, và không câu nào chấm điểm báo cáo.
+  // Những phát hiện ở trên do rule pack sinh ra và không hề đổi.
+  'model.addition-heading': () => 'PHẦN NÀY DO MỘT MÔ HÌNH VIẾT, KHÔNG PHẢI DO MỘT LUẬT',
+  'model.unavailable': () =>
+    'Bình thường ở đây sẽ có thêm một đoạn tóm tắt bằng tiếng người, và lần ' +
+    'này thì không: tôi không kết nối được tới mô hình mà bản dựng này dùng. ' +
+    'Mọi thứ ở trên vẫn được làm ra mà không cần nó, đúng như mọi báo cáo ' +
+    'trước khi có tính năng ấy.',
+  // ---- câu trả lời có biên ----
+  //
+  // Do người viết, và đã được đo trên người. Model chỉ chọn cái nào áp dụng,
+  // không viết câu.
+  'answer.rests-on': (p) =>
+    `Những gì lần quét nói được về chuyện đó dựa trên: ${s(p, 'facts')}.`,
+  'answer.cannot': (p) =>
+    `Lần quét này không trả lời được câu đó. Nó không xem tới ${s(p, 'missing')}, ` +
+    `nên mọi câu tôi nói thêm ở đây đều là đoán.`,
+  'answer.missing.who': () => 'những ai có liên quan',
+  'answer.missing.when': () => 'chuyện xảy ra vào lúc nào',
+  'answer.missing.why': () => 'vì sao chuyện đó xảy ra',
+  'answer.missing.which_rows': () => 'cụ thể đó là những dòng nào',
+  'answer.missing.impact': () => 'nó tốn gì hoặc ảnh hưởng tới đâu',
+  'answer.missing.elsewhere': () => 'bất cứ thứ gì ngoài những bảng nó được trỏ vào',
+
+  // Bản đọc lại. Ngôi thứ nhất, thì tương lai gần, và nêu ĐỦ tên định danh:
+  // người dùng nhìn thấy một cái bảng mình không hề nhắc tới thì phải nhận ra
+  // ngay lúc liếc qua, vì đó là lúc duy nhất họ còn nhìn.
+  'rule.will-check.points-at-an-existing-row': (p) =>
+    `Tôi sẽ kiểm rằng mọi giá trị ở ${s(p, 'columns')} của ${s(p, 'table')} ` +
+    `đều khớp với một dòng trong ${s(p, 'target')}, và đếm những cái không khớp.`,
+  'rule.will-check.is-never-missing': (p) =>
+    `Tôi sẽ kiểm rằng không dòng nào trong ${s(p, 'table')} bỏ trống ` +
+    `${s(p, 'columns')}, và đếm những dòng bỏ trống.`,
+  'rule.will-check.is-never-repeated': (p) =>
+    `Tôi sẽ kiểm rằng không hai dòng nào trong ${s(p, 'table')} trùng nhau ở ` +
+    `${s(p, 'columns')}, và đếm những giá trị bị lặp.`,
+  'rule.will-check.stays-within-its-usual-set': (p) =>
+    `Tôi sẽ kiểm rằng ${s(p, 'columns')} của ${s(p, 'table')} không mang giá ` +
+    `trị nào nằm ngoài tập nhỏ nó vẫn dùng, và đếm những giá trị nằm ngoài.`,
+  'rule.cannot': (p) =>
+    `Tôi không biến câu đó thành một phép kiểm chạy được ở đây. Nó ` +
+    `${s(p, 'detail')}. Đó là giới hạn của những gì một lần quét database này ` +
+    `phân xử được, không phải một phán xét về quy tắc bạn mô tả.`,
+  'rule.unsupported.needs_a_number': () =>
+    'dựa vào một con số mà tôi không có căn cứ nào để phán xét',
+  'rule.unsupported.needs_time': () =>
+    'nói về chuyện xảy ra lúc nào, còn tôi chỉ thấy database này ở một thời điểm',
+  'rule.unsupported.needs_meaning': () =>
+    'phụ thuộc vào ý nghĩa của giá trị đối với nghiệp vụ của bạn, không phải ' +
+    'vào bản thân giá trị',
+  'rule.unsupported.needs_another_system': () =>
+    'nói về một thứ không nằm trong database này',
+  'rule.unsupported.not_about_rows': () =>
+    'nói về con người, quy trình hay quyền hạn chứ không phải về các dòng dữ liệu',
+  'rule.unsupported.names_nothing_here': () =>
+    'không nêu tên bảng hay cột nào tôi tìm thấy ở đây',
+
+  'fact.column': () => 'cột nào',
+  'fact.what-the-scan-says': () => 'điều lần quét đã nói về nó',
+  'fact.confidence': () => 'mức chắc chắn của lần quét',
+  'fact.how-measured': () => 'cách nó được đo',
+  'fact.rows-examined': () => 'phát hiện này dựa trên bao nhiêu dòng',
+  'fact.sampling': () => 'đếm hết mọi dòng hay chỉ lấy mẫu',
+  'fact.targets-checked': () => 'luật này kiểm bao nhiêu mục tiêu',
+  'fact.boundary': () => 'điều lần quét nói là nó không kết luận được',
+
+  'model.declined': () =>
+    'Bình thường ở đây sẽ có thêm một đoạn tóm tắt bằng tiếng người, và lần ' +
+    'này thì không: gửi đi đồng nghĩa với việc cho một bên thứ ba thấy một ' +
+    'phần dữ liệu của bạn, và bản dựng này không làm vậy. Mọi thứ ở trên vẫn ' +
+    'được làm ra mà không cần nó.',
 
   // ---- dòng ghi phạm vi ----
   'strip.tables-visible': (p) =>

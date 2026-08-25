@@ -16,6 +16,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
+import { DEFECT_WORDS_VI } from '../src/findings.js';
 import { sealSetAside, sealSetAsides, SetAsideRefused } from '../src/set-aside.js';
 
 describe('a sentence the scanner declines to raise', () => {
@@ -43,6 +44,78 @@ describe('a sentence the scanner declines to raise', () => {
           }),
         new RegExp(`says "${word}"`, 'i'),
         `"${word}" reached a reader through the set-aside list`,
+      );
+    }
+  });
+
+  it('refuses a defect word in Vietnamese too', () => {
+    // 🟥 Open from the day LEDAR_LANG=vi shipped until 2026-08-24. The word
+    // list was English-only, so hard rule ③ was enforced on half the product.
+    // It stayed harmless only because every Vietnamese sentence was written by
+    // a person who had read the vi catalogue's header. It stops being harmless
+    // the moment a model writes Vietnamese into a report — VS-8 — so the fence
+    // goes up before the thing it fences exists.
+    //
+    // AGENTS §4.9 ①, third occurrence: a gate that reads one language guards
+    // half a report.
+    for (const word of DEFECT_WORDS_VI) {
+      assert.throws(
+        () =>
+          sealSetAside({
+            target: 'public.orders.user_id',
+            reason: `những giá trị này ${word}, nên tôi không nêu ra`,
+          }),
+        // The message matcher, not the class: `assertNoDefectWords` throws a
+        // plain Error, the way the English case above already asserts. A test
+        // that named the class here would pass on a shape failure and call it
+        // a word ban.
+        new RegExp(`says "${word}"`, 'i'),
+        `"${word}" reached a Vietnamese reader through the set-aside list`,
+      );
+    }
+  });
+
+  it('has no entry that can never fire', () => {
+    // 🟥 The trap this exists for: JavaScript's \w is ASCII-only, so a
+    // Vietnamese vowel carrying a diacritic is a NON-word character. `hư`
+    // has non-word characters on both sides of its trailing boundary and
+    // therefore never matches anything at all. It compiles, it reads
+    // correctly, and it is dead.
+    //
+    // A plausible future addition — `sai số` — would end on `ố` and join
+    // the list as a rule nobody enforces. The count would say the rule is
+    // covered. A word list with one silently dead entry is worse than a
+    // shorter list.
+    for (const word of DEFECT_WORDS_VI) {
+      assert.throws(
+        () =>
+          sealSetAside({
+            target: 'public.orders.user_id',
+            reason: `giá trị ${word} ở đây, nên tôi không nêu ra`,
+          }),
+        new RegExp(`says "${word}"`, 'i'),
+        `"${word}" is in the ban list and matches nothing — check its \b ` +
+          `boundaries, and whether it ends on an ASCII letter`,
+      );
+    }
+  });
+
+  it('does not ban the words the Vietnamese catalogue needs', () => {
+    // The interesting half of the rule. `hư` means broken — and `hư không`
+    // means NOTHINGNESS, which is exactly what the vi catalogue says in
+    // `layer-b.aside.one-repeated-value`: links that lead `tới hư không`. That
+    // phrasing was itself written to satisfy an earlier version of this rule.
+    // A gate banning `hư` would fail the sentence written to obey it.
+    //
+    // `sai số` is `margin of error`, a thing this product says about its own
+    // measurements constantly. Banning bare `sai` would take that with it.
+    for (const reason of [
+      'chừng ấy liên kết dẫn tới hư không, nên tôi không nêu nó thành câu hỏi',
+      'sai số của phép lấy mẫu quá lớn để nói được điều gì',
+    ]) {
+      assert.doesNotThrow(
+        () => sealSetAside({ target: 'public.orders.user_id', reason }),
+        `the gate refused a sentence the product itself writes: ${reason}`,
       );
     }
   });

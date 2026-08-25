@@ -33,6 +33,7 @@ import {
   ConfidenceBasis,
   EgressClass,
   LANGS,
+  LlmCallOutcome,
   Severity,
   UserStatus,
 } from '@ledar/contracts';
@@ -53,6 +54,11 @@ const PAIRS: readonly { column: string; contract: readonly string[] }[] = [
   // wrapping it in an enum purely to satisfy the shape of this table would be
   // a type existing for a test.
   { column: 'lang', contract: LANGS },
+  // HS-D D.4. `tier` and `model` on the same table are deliberately NOT
+  // here: they are free text, because the tier list belongs to D.1's config
+  // and D.1 does not exist. A pair for them would be comparing this store
+  // against a decision nobody has made.
+  { column: 'llmCallOutcome', contract: LlmCallOutcome.options },
 ];
 
 describe('the store\'s copy of the contract vocabularies', () => {

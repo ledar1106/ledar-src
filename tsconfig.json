@@ -20,6 +20,9 @@
       "path": "packages/store"
     },
     {
+      "path": "packages/model-client"
+    },
+    {
       "path": "apps/cli"
     },
     {

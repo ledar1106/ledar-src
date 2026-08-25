@@ -40,6 +40,12 @@ export const EN: Catalog = {
   'scan.tables-empty-line': (p) =>
     `${s(p, 'empty')} of ${s(p, 'total')} tables hold no rows — data rules ` +
     `could not say anything about those`,
+  // Parenthesised rather than set off with a dash: the clause after this one
+  // already ends in a dash, and two dashes in one line turn a magnitude into
+  // an aside.
+  'scan.tables-empty-line.share': (p) =>
+    `${s(p, 'empty')} of ${s(p, 'total')} tables (${s(p, 'share')} of them) ` +
+    `hold no rows — data rules could not say anything about those`,
 
   'scan.facts-are-facts': () =>
     'The counts here are facts — a query reproduces every one. Whether a ' +
@@ -173,6 +179,18 @@ export const EN: Catalog = {
     `${plural(n(p, 'empty'), 'holds', 'hold')} no rows. A query ran against ` +
     `${plural(n(p, 'empty'), 'it', 'them')} and came back with nothing, so ` +
     `nothing was learned there either way.`,
+  // The same line with its magnitude said out loud.
+  //
+  // Everything after the interjection is the wording VS-7 was measured
+  // against, unchanged. What failed there was not this sentence's clauses; it
+  // was that `18` and `36` were printed and `half` was not.
+  'verdict.gap.empty-tables.share': (p) =>
+    `${s(p, 'empty')} of the ${s(p, 'total')} ` +
+    `${plural(n(p, 'total'), 'table', 'tables')} — ${s(p, 'share')} of ` +
+    `${plural(n(p, 'total'), 'it', 'them')} — ` +
+    `${plural(n(p, 'empty'), 'holds', 'hold')} no rows. A query ran against ` +
+    `${plural(n(p, 'empty'), 'it', 'them')} and came back with nothing, so ` +
+    `nothing was learned there either way.`,
   'verdict.gap.empty-columns': (p) =>
     `${s(p, 'count')} ${plural(n(p, 'count'), 'column', 'columns')} that a ` +
     `data rule was aiming at had no rows to compare. ` +
@@ -183,6 +201,104 @@ export const EN: Catalog = {
     `${s(p, 'count')} ${plural(n(p, 'count'), 'target', 'targets')} a rule ` +
     `was entitled to check ${plural(n(p, 'count'), 'was', 'were')} not ` +
     `checked. They are named above, with the reason for each.`,
+
+  // ---- how big a count is against its whole ----
+  //
+  // Quantities. Each is interpolated into a sentence above, never printed on
+  // its own, and each is either exact or — for the percentage fallback, which
+  // is not in this catalogue — off by less than a point.
+  'share.quarter': () => 'a quarter',
+  'share.third': () => 'a third',
+  'share.half': () => 'half',
+  'share.two-thirds': () => 'two thirds',
+  'share.three-quarters': () => 'three quarters',
+  'share.almost-all': () => 'almost all',
+  'share.all': () => 'all',
+
+  // ---- what the model step did not add ----
+  //
+  // Each names the missing ADDITION and says nothing about the report. The
+  // findings above came from rule packs and did not change; wording that
+  // graded them would claim a model path is better than the packs, and the
+  // only measurement this product has points the other way.
+  // A reader is never left working out which sentences a machine wrote.
+  // `origin: 'model_written'` has been in the claim vocabulary since _doc/05
+  // §7 for the same reason; this is that distinction reaching the page.
+  'model.addition-heading': () => 'ADDED BY A LANGUAGE MODEL, NOT BY A RULE',
+  'model.unavailable': () =>
+    'A plain-language summary would normally be added here, and was not: the ' +
+    'model this build uses could not be reached. Everything above was ' +
+    'produced without it, the same way every report before this feature ' +
+    'existed was.',
+  // ---- a bounded answer ----
+  //
+  // Written by a person, measured on people. VS-7 put hand-written prose in
+  // front of five readers and four took the right conclusion from it; this is
+  // that prose, kept, with a model deciding WHICH of it applies rather than
+  // writing its own.
+  'answer.rests-on': (p) =>
+    `What the scan can say about that rests on: ${s(p, 'facts')}.`,
+  'answer.cannot': (p) =>
+    `The scan cannot answer that. It did not look at ${s(p, 'missing')}, so ` +
+    `anything said about it here would be guessing.`,
+  'answer.missing.who': () => 'who was involved',
+  'answer.missing.when': () => 'when any of it happened',
+  'answer.missing.why': () => 'why it happened',
+  'answer.missing.which_rows': () => 'which particular rows these are',
+  'answer.missing.impact': () => 'what it costs or affects',
+  'answer.missing.elsewhere': () => 'anything outside the tables it was pointed at',
+
+  // The read-back. Second person, present tense, and it names the identifiers
+  // in full: a user who sees a table they did not mean has to be able to see
+  // it at a glance, because that is the only moment they will.
+  'rule.will-check.points-at-an-existing-row': (p) =>
+    `I will check that every value in ${s(p, 'columns')} of ${s(p, 'table')} ` +
+    `matches a row in ${s(p, 'target')}, and count the ones that do not.`,
+  'rule.will-check.is-never-missing': (p) =>
+    `I will check that no row in ${s(p, 'table')} leaves ${s(p, 'columns')} ` +
+    `empty, and count the ones that do.`,
+  'rule.will-check.is-never-repeated': (p) =>
+    `I will check that no two rows in ${s(p, 'table')} share the same ` +
+    `${s(p, 'columns')}, and count the ones that repeat.`,
+  'rule.will-check.stays-within-its-usual-set': (p) =>
+    `I will check that ${s(p, 'columns')} in ${s(p, 'table')} holds no value ` +
+    `outside the small set it already uses, and count the ones outside it.`,
+  // 🟥 An earlier draft ended "not the same as saying your rule is wrong",
+  // and hard rule ③ caught it — the ban does not read negation, which is the
+  // exact finding that produced `bounded-answer` in the first place. The
+  // remedy available for this product's own prose is to rewrite the sentence,
+  // and this is that remedy taken rather than argued with.
+  'rule.cannot': (p) =>
+    `I cannot turn that into something I can check here. It ${s(p, 'detail')}. ` +
+    `That is a limit on what a scan of this database can settle, not a ` +
+    `judgement about the rule you described.`,
+  'rule.unsupported.needs_a_number': () =>
+    'turns on an amount I have no grounds to judge one way or the other',
+  'rule.unsupported.needs_time': () =>
+    'is about when things happened, and I see this database at one moment',
+  'rule.unsupported.needs_meaning': () =>
+    'depends on what the values mean to your business, not on what they are',
+  'rule.unsupported.needs_another_system': () =>
+    'is about something that is not in this database',
+  'rule.unsupported.not_about_rows': () =>
+    'is about people, process or permission rather than about rows',
+  'rule.unsupported.names_nothing_here': () =>
+    'does not name a table or column I can find here',
+
+  'fact.column': () => 'which column this is about',
+  'fact.what-the-scan-says': () => 'what the scan already says about it',
+  'fact.confidence': () => 'how sure the scan is',
+  'fact.how-measured': () => 'how it was measured',
+  'fact.rows-examined': () => 'how many rows the finding rests on',
+  'fact.sampling': () => 'whether every row was counted or a sample was drawn',
+  'fact.targets-checked': () => 'how many targets this rule checked',
+  'fact.boundary': () => 'what the scan says it cannot conclude',
+
+  'model.declined': () =>
+    'A plain-language summary would normally be added here, and was not: ' +
+    'sending it would have meant showing part of your data to a third party, ' +
+    'and this build will not do that. Everything above was produced without ' +
+    'it.',
 
   // ---- the scope strip ----
   'strip.tables-visible': (p) =>

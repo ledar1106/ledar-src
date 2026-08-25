@@ -48,6 +48,7 @@
 
 import { t } from './i18n.js';
 import type { Lang } from './i18n.js';
+import { emptyTablesLine } from './share.js';
 
 /** What the printer knows by the time the report has been assembled. */
 export type VerdictInput = {
@@ -135,11 +136,19 @@ function gapsIn(input: VerdictInput, lang: Lang): string[] {
   const out: string[] = [];
 
   if (input.tablesEmpty > 0 && input.tablesTotal > 0) {
+    // The magnitude, said rather than left to be divided out. Below a quarter
+    // it is deliberately not said at all — see share.ts for why the report has
+    // no quarrel with a reader who reads 8 of 36 as "a few".
     out.push(
-      t(lang, 'verdict.gap.empty-tables', {
-        empty: input.tablesEmpty,
-        total: input.tablesTotal,
-      }),
+      emptyTablesLine(
+        {
+          plain: 'verdict.gap.empty-tables',
+          withShare: 'verdict.gap.empty-tables.share',
+        },
+        input.tablesEmpty,
+        input.tablesTotal,
+        lang,
+      ),
     );
   }
 

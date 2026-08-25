@@ -8,6 +8,8 @@ export {
   structureHash,
 } from './identity.js';
 export { SCHEMA_VERSION } from './schema.js';
+export { AnswerCache } from './answer-cache.js';
+export type { CacheKey } from './answer-cache.js';
 export { ScanStore } from './store.js';
 export { openHistory, retiredName } from './retire.js';
 export { RetiredHistoryReader } from './legacy.js';

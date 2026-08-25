@@ -500,6 +500,63 @@ export type ScanResult = z.infer<typeof ScanResult>;
 const FORBIDDEN_IN_UNCONFIRMED = /\b(bug|broken|error|wrong|invalid|corrupt|failure)\b/i;
 
 /**
+ * The same ban, in the other language this product speaks.
+ *
+ * 🟥 Found 2026-08-24, and it had been open since the day `LEDAR_LANG=vi`
+ * shipped. The list above is English-only, so from the moment the report could
+ * be rendered in Vietnamese, **hard rule ③ was enforced on half of it.** The
+ * Vietnamese catalogue kept the rule anyway — its own header records the
+ * decision *"KHÔNG dùng 'lỗi' cho phát hiện Tầng B"* — but kept it BY HAND,
+ * which is a promise in a comment, and this codebase already knows what those
+ * are worth.
+ *
+ * It stayed harmless only because every Vietnamese sentence in the product was
+ * written by a person who had read that header. It stops being harmless the
+ * moment a model writes Vietnamese into a report, which is precisely what
+ * VS-8 is for — so the fence goes up before the thing it fences exists.
+ *
+ * This is `AGENTS.md` §4.9 ① a third time: *a gate that reads one language
+ * guards half a report*. Written down twice already, and still missed here,
+ * because the gate was written when there was only one language to read.
+ *
+ * ## Why these words and not the obvious ones
+ *
+ * `hư` is NOT here, and that is the interesting exclusion. It means broken —
+ * and `hư không` means *nothingness*, which is exactly what the Vietnamese
+ * catalogue says in `layer-b.aside.one-repeated-value`: links that lead
+ * `tới hư không`. That phrasing was itself the fix for an earlier version of
+ * this same rule. A gate banning `hư` would have failed the sentence written
+ * to satisfy it.
+ *
+ * `sai` alone is out for the same reason: `sai số` is *margin of error*, a
+ * thing this product says about its own measurements constantly. `sai sót` —
+ * a mistake — is unambiguous, so that is what is banned.
+ *
+ * ## 🟥 A trap for whoever extends this list
+ *
+ * **`` does not work after a Vietnamese vowel that carries a diacritic.**
+ * JavaScript's `\w` is ASCII-only, so `ư`, `ố`, `ạ` are non-word characters.
+ * `hư` has a non-word character on both sides of its trailing boundary and
+ * therefore **never matches anything, ever** — it compiles, it reads correctly,
+ * and it is dead.
+ *
+ * Every entry above ends on an ASCII letter (`i`, `g`, `t`) for exactly this
+ * reason. A plausible addition like `sai số` would end on `ố` and join the
+ * list as a rule that is never enforced.
+ *
+ * Not left to this comment: `set-aside.test.ts` asserts that every entry here
+ * can actually fire. A word list where one entry is silently dead is worse
+ * than a shorter list, because the count says the rule is covered.
+ */
+const FORBIDDEN_IN_UNCONFIRMED_VI = /(\blỗi\b|\bhỏng\b|\bhư hỏng\b|\bsai sót\b|\bbị lỗi\b)/i;
+
+/**
+ * The banned Vietnamese words as plain strings, for the test that proves each
+ * one can still fire. Kept beside the regex so the two cannot drift apart.
+ */
+export const DEFECT_WORDS_VI = ['lỗi', 'hỏng', 'hư hỏng', 'sai sót', 'bị lỗi'] as const;
+
+/**
  * The word ban, on any sentence that reaches a reader.
  *
  * Lifted out of `assertClaimDiscipline` when debt N42 found the second channel
@@ -512,7 +569,8 @@ const FORBIDDEN_IN_UNCONFIRMED = /\b(bug|broken|error|wrong|invalid|corrupt|fail
  * says which sentence and which rule, rather than only which word.
  */
 export function assertNoDefectWords(text: string, subject: string): void {
-  const hit = FORBIDDEN_IN_UNCONFIRMED.exec(text);
+  const hit =
+    FORBIDDEN_IN_UNCONFIRMED.exec(text) ?? FORBIDDEN_IN_UNCONFIRMED_VI.exec(text);
   if (hit) {
     throw new Error(
       `${subject} but says "${hit[0]}". An observed pattern is not a defect ` +

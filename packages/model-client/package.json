@@ -1,0 +1,17 @@
+{
+  "name": "@ledar/model-client",
+  "version": "0.0.0",
+  "description": "The part that talks to a model. Accepts only a sealed prompt, returns only a sealed answer, and records every call whether it worked or not.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "test": "tsx --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@ledar/contracts": "*"
+  }
+}
