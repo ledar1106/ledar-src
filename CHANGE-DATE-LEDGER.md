@@ -105,7 +105,8 @@ have no Change Date. They are listed here only so the boundary stays visible.
 | `packages/test-fixtures` | Apache 2.0 | source public since 2026-08-22 · `private: true`, never goes to npm |
 | `apps/cli` | Apache 2.0 | source public since 2026-08-22 · not on npm |
 | `apps/engine` | Apache 2.0 | created 2026-08-22 · not on npm |
-| `packages/model-client` | Apache 2.0 | created 2026-08-24 · not on npm · not in publish-allowlist yet |
+| `packages/model-client` | Apache 2.0 | source public since 2026-08-25 · not on npm |
+| `packages/rule-runner` | Apache 2.0 | created 2026-08-25 · not on npm |
 
 > Wildcards used to stand in this table — `packages/connector-*`,
 > `packages/packs-*` — each marked *does not exist yet*. All seven existed by

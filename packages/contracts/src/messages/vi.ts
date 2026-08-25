@@ -43,6 +43,7 @@ export const VI: Catalog = {
   'head.database-confirms': () => 'NHỮNG GÌ CHÍNH DATABASE XÁC NHẬN',
   'head.patterns': () => 'NHỮNG CHỖ ĐÁNG HỎI LẠI',
   'head.verdict': () => 'BÁO CÁO NÀY CHỨNG MINH ĐƯỢC GÌ, VÀ KHÔNG CHỨNG MINH ĐƯỢC GÌ',
+  'head.you-asked': () => 'NHỮNG THỨ BẠN BẢO TÔI KIỂM',
 
   // ---- giọng của bộ quét ----
   'scan.connected-as': (p) =>
@@ -245,9 +246,6 @@ export const VI: Catalog = {
   'rule.will-check.is-never-repeated': (p) =>
     `Tôi sẽ kiểm rằng không hai dòng nào trong ${s(p, 'table')} trùng nhau ở ` +
     `${s(p, 'columns')}, và đếm những giá trị bị lặp.`,
-  'rule.will-check.stays-within-its-usual-set': (p) =>
-    `Tôi sẽ kiểm rằng ${s(p, 'columns')} của ${s(p, 'table')} không mang giá ` +
-    `trị nào nằm ngoài tập nhỏ nó vẫn dùng, và đếm những giá trị nằm ngoài.`,
   'rule.cannot': (p) =>
     `Tôi không biến câu đó thành một phép kiểm chạy được ở đây. Nó ` +
     `${s(p, 'detail')}. Đó là giới hạn của những gì một lần quét database này ` +
@@ -265,6 +263,38 @@ export const VI: Catalog = {
     'nói về con người, quy trình hay quyền hạn chứ không phải về các dòng dữ liệu',
   'rule.unsupported.names_nothing_here': () =>
     'không nêu tên bảng hay cột nào tôi tìm thấy ở đây',
+
+  // Sau khi quy tắc của người dùng đã chạy. Câu nào cũng nói rõ đó là quy tắc
+  // CỦA HỌ, và không câu nào gọi một chỗ khớp là khuyết tật — ở mức `probable`
+  // thì `assertClaimDiscipline` cũng sẽ từ chối, nhưng câu chữ không nên muốn.
+  'user-rule.found': (p) =>
+    `${s(p, 'count')} trong ${s(p, 'total')} dòng ở ${s(p, 'table')} không ` +
+    `khớp quy tắc bạn mô tả. Chuyện đó có đáng ngại hay không là bạn nói — ` +
+    `đây là quy tắc của bạn, không phải điều database này tự khai.`,
+  'user-rule.none': (p) =>
+    `Cả ${s(p, 'total')} dòng ở ${s(p, 'table')} đều khớp quy tắc bạn mô tả. ` +
+    `Đó là quy tắc của bạn đang đúng HÔM NAY, không phải một ràng buộc: ` +
+    `không có gì trong database giữ cho nó còn đúng ngày mai.`,
+  'user-rule.nothing-to-check': (p) =>
+    `${s(p, 'table')} không có dòng nào, nên quy tắc của bạn chưa có gì để ` +
+    `đúng hay không đúng. Một bảng rỗng không phải là một bảng sạch.`,
+  'user-rule.technical': (p) =>
+    `${s(p, 'rule')} trên ${s(p, 'target')}: ${s(p, 'rows')} trên ` +
+    `${s(p, 'total')} dòng`,
+  // Cau bien gioi GIU NGUYEN du con so la bao nhieu, vi gioi han la mot:
+  // field-results 24/25 do duoc model anh xa cau vao SAI BANG ma van dem
+  // dung. Khong con so nao phat hien duoc chuyen do.
+  'user-rule.boundary': () =>
+    'Tôi đã kiểm đúng quy tắc như nó vừa được đọc lại cho bạn. Tôi không ' +
+    'kiểm được đó có đúng là quy tắc bạn muốn nói hay không — chỉ bạn mới ' +
+    'nói được điều đó.',
+  // In MOT LAN o dau muc, khong in theo tung phat hien.
+  'scan.you-asked-preamble': () =>
+    'Đây là những quy tắc bạn đã mô tả lúc thiết lập. Tôi kiểm từng cái ' +
+    'đúng như nó vừa được đọc lại cho bạn — chứ không kiểm được đó có ' +
+    'đúng là quy tắc bạn muốn nói hay không. Và một quy tắc còn đúng ở ' +
+    'đây là quy tắc của bạn đang đúng HÔM NAY, không phải database đang ' +
+    'bắt buộc nó.',
 
   'fact.column': () => 'cột nào',
   'fact.what-the-scan-says': () => 'điều lần quét đã nói về nó',

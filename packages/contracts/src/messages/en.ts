@@ -26,6 +26,11 @@ export const EN: Catalog = {
   'head.database-confirms': () => 'WHAT THE DATABASE ITSELF CONFIRMS',
   'head.patterns': () => 'PATTERNS WORTH ASKING ABOUT',
   'head.verdict': () => 'WHAT THIS REPORT WILL AND WILL NOT SUPPORT',
+  // Names the provenance in the heading itself, the way the other two do.
+  // "WHAT THE DATABASE ITSELF CONFIRMS" and "PATTERNS WORTH ASKING ABOUT"
+  // both say who is speaking before a reader gets to a single number, and a
+  // section holding somebody's own rules has more need of that, not less.
+  'head.you-asked': () => 'WHAT YOU ASKED ME TO CHECK',
 
   // ---- the scan's own voice ----
   'scan.connected-as': (p) => `connected as ${s(p, 'user')}, read-only ${s(p, 'enforcement')}`,
@@ -260,14 +265,6 @@ export const EN: Catalog = {
   'rule.will-check.is-never-repeated': (p) =>
     `I will check that no two rows in ${s(p, 'table')} share the same ` +
     `${s(p, 'columns')}, and count the ones that repeat.`,
-  'rule.will-check.stays-within-its-usual-set': (p) =>
-    `I will check that ${s(p, 'columns')} in ${s(p, 'table')} holds no value ` +
-    `outside the small set it already uses, and count the ones outside it.`,
-  // 🟥 An earlier draft ended "not the same as saying your rule is wrong",
-  // and hard rule ③ caught it — the ban does not read negation, which is the
-  // exact finding that produced `bounded-answer` in the first place. The
-  // remedy available for this product's own prose is to rewrite the sentence,
-  // and this is that remedy taken rather than argued with.
   'rule.cannot': (p) =>
     `I cannot turn that into something I can check here. It ${s(p, 'detail')}. ` +
     `That is a limit on what a scan of this database can settle, not a ` +
@@ -284,6 +281,39 @@ export const EN: Catalog = {
     'is about people, process or permission rather than about rows',
   'rule.unsupported.names_nothing_here': () =>
     'does not name a table or column I can find here',
+
+  // After a user's rule has run. Every one of these says whose rule it was,
+  // and none of them calls a match a defect — `assertClaimDiscipline` would
+  // refuse that anyway at `probable`, and the sentence should not want to.
+  'user-rule.found': (p) =>
+    `${s(p, 'count')} of the ${s(p, 'total')} rows in ${s(p, 'table')} do not ` +
+    `match the rule you described. Whether that matters is yours to say — ` +
+    `this is your rule, not something this database declares.`,
+  'user-rule.none': (p) =>
+    `All ${s(p, 'total')} rows in ${s(p, 'table')} match the rule you ` +
+    `described. That is your rule holding today, not a constraint: nothing ` +
+    `in the database keeps it true tomorrow.`,
+  'user-rule.nothing-to-check': (p) =>
+    `${s(p, 'table')} holds no rows, so your rule had nothing to be true or ` +
+    `untrue about. An empty table is not a clean one.`,
+  'user-rule.technical': (p) =>
+    `${s(p, 'rule')} on ${s(p, 'target')}: ${s(p, 'rows')} of ${s(p, 'total')} rows`,
+  // The boundary is the SAME sentence whatever the count, because the limit
+  // is the same: field-results 24 and 25 measured a model mapping a sentence
+  // onto the wrong table while counting perfectly. No number detects that, so
+  // no number gets to imply it was checked.
+  'user-rule.boundary': () =>
+    'I checked the rule exactly as it was read back to you. I did not check ' +
+    'whether that is the rule you meant — only you can tell me that.',
+  // Printed ONCE above the section, never per finding. It carries what
+  // field-results 24 and 25 measured, and that is true of every rule in
+  // the section at the same time — VS-7 found what a sentence repeated
+  // per finding costs: it stops being read.
+  'scan.you-asked-preamble': () =>
+    'These are rules you described at setup. I checked each one exactly ' +
+    'as it was read back to you — not whether that is the rule you meant. ' +
+    'And a rule that holds here is your rule holding today, not the ' +
+    'database enforcing it.',
 
   'fact.column': () => 'which column this is about',
   'fact.what-the-scan-says': () => 'what the scan already says about it',

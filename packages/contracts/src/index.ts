@@ -9,6 +9,7 @@ export * from './llm-call.js';
 export * from './model-step.js';
 export * from './bounded-answer.js';
 export * from './bounded-rule.js';
+export * from './user-rule-section.js';
 export * from './report-parts.js';
 export * from './set-aside.js';
 export * from './i18n.js';

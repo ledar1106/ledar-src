@@ -35,6 +35,7 @@ import type {
 import {
   assertScopeManifest,
   buildScopeStrip,
+  buildUserRuleSection,
   scopeStripByRule,
   scopeCoverageSentence,
   scopeStripLine,
@@ -940,6 +941,44 @@ async function main(): Promise<number> {
       }
     } else {
       for (const f of facts) printFact(f);
+    }
+
+    // ---- Rules the USER asked for ----------------------------------------
+    //
+    // Conditional, and that is the whole reason this can exist at all. VS-7
+    // measured this layout with five real readers and there is no second
+    // round, so a change to it can never be re-measured. Nothing produces a
+    // user rule yet — VS-6 has no screens and nothing here calls `runRule` —
+    // so `buildUserRuleSection` returns null on every report anyone has read,
+    // and the measured layout stays byte-identical.
+    //
+    // Placed after the database and before the patterns. Two orderings agree,
+    // which is how you know it is not taste: by authority (the database
+    // declared it > you declared it > I guessed it) and by confidence
+    // (certain > probable > unconfirmed).
+    const asked = buildUserRuleSection(
+      [...layerA.findings, ...layerB.findings],
+      LANG,
+    );
+    if (asked) {
+      console.log(heading(asked.heading));
+      console.log('');
+      for (const line of wrap(asked.preamble, 68)) console.log(`    ${line}`);
+      console.log('');
+      for (const e of asked.entries) {
+        for (const line of wrap(e.plain, 68)) console.log(`    ${line}`);
+        console.log('');
+        console.log(`      ${T('scan.where', { target: e.where })}`);
+        for (const line of wrap(T('scan.why', { detail: e.why }), 66)) {
+          console.log(`      ${line}`);
+        }
+        if (e.boundary !== null) {
+          for (const line of wrap(T('scan.but-only-this-far', { boundary: e.boundary }), 66)) {
+            console.log(`      ${line}`);
+          }
+        }
+        console.log('');
+      }
     }
 
     // ---- Layer B ---------------------------------------------------------

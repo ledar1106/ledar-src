@@ -94,16 +94,36 @@ export const RuleCheck = z.enum([
   'is-never-missing',
   /** No two rows share a value. */
   'is-never-repeated',
-  /**
-   * No value outside the small set the column already uses.
-   *
-   * The set comes from the DATA, not from the sentence — this is `layer-b/
-   * enum-drift`, and that is why it can be here at all. A version that took
-   * the allowed values from the user's text would be a free-text field wearing
-   * an enum's name.
-   */
-  'stays-within-its-usual-set',
 ]);
+
+/**
+ * 🟥 A fourth check was here and is gone — `stays-within-its-usual-set`,
+ * removed 2026-08-25 on the day something first tried to RUN one of these.
+ *
+ * Its docstring justified it by saying *"the set comes from the DATA, not the
+ * sentence — this is `layer-b/enum-drift`"*. That rule does not exist. It is a
+ * string in a test fixture, and I cited it as an implementation. A citation
+ * nobody followed is how a vocabulary grows an entry nothing can honour.
+ *
+ * And it is not merely unimplemented — as written it is VACUOUS. If the
+ * allowed set is *the distinct values present when we looked*, every value is
+ * in it by construction and the check can never find anything. It only means
+ * something ACROSS TIME, when a later scan meets a value the earlier one did
+ * not, and that is `npm run diff`, not a check a single scan can run.
+ *
+ * It survived two paid rounds (㉔, ㉕ — 132 shots) purely because no model
+ * ever picked it. Nothing broke, and nothing would have, until the first
+ * customer sentence mapped onto it and the executor had to refuse a rule the
+ * seal had already approved.
+ *
+ * > **A vocabulary entry nothing can execute is a promise this product cannot
+ * > keep**, and the seal accepting it makes the promise look checked.
+ *
+ * Removing it changes no measurement: 0 of 132 answers chose it and no
+ * expected answer used it. It does shrink the option list in the prompt from
+ * four to three, so a FUTURE round is not byte-comparable with ㉔ and ㉕ —
+ * noted here rather than discovered later.
+ */
 export type RuleCheck = z.infer<typeof RuleCheck>;
 
 export const RULE_CHECKS = RuleCheck.options;

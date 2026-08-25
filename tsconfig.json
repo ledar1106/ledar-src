@@ -20,6 +20,9 @@
       "path": "packages/store"
     },
     {
+      "path": "packages/rule-runner"
+    },
+    {
       "path": "packages/model-client"
     },
     {

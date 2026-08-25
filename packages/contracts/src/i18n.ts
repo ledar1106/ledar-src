@@ -79,6 +79,7 @@ export type MessageKey =
   | 'head.database-confirms'
   | 'head.patterns'
   | 'head.verdict'
+  | 'head.you-asked'
   // ---- the scan's own voice ----
   | 'scan.connected-as'
   | 'scan.read-only-enforced'
@@ -170,7 +171,6 @@ export type MessageKey =
   | 'rule.will-check.points-at-an-existing-row'
   | 'rule.will-check.is-never-missing'
   | 'rule.will-check.is-never-repeated'
-  | 'rule.will-check.stays-within-its-usual-set'
   | 'rule.cannot'
   | 'rule.unsupported.needs_a_number'
   | 'rule.unsupported.needs_time'
@@ -178,6 +178,19 @@ export type MessageKey =
   | 'rule.unsupported.needs_another_system'
   | 'rule.unsupported.not_about_rows'
   | 'rule.unsupported.names_nothing_here'
+  // ---- a user's own rule, after it RAN ----
+  //
+  // VS-6's other half. These are the only sentences in the product that
+  // report on a rule the product did not choose, and every one of them says
+  // so — a count against someone's own rule is not the database confirming
+  // anything, and a reader who cannot tell those apart has been told the
+  // wrong thing.
+  | 'user-rule.found'
+  | 'user-rule.none'
+  | 'user-rule.nothing-to-check'
+  | 'user-rule.technical'
+  | 'user-rule.boundary'
+  | 'scan.you-asked-preamble'
   // ---- what one fact IS, for the person reading the answer ----
   //
   // 🟥 `EvidenceFact.label` is English on purpose — a model reads it inside
