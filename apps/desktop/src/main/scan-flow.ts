@@ -55,6 +55,7 @@ import type {
 } from '@ledar/connector-postgres';
 import {
   assertScopeManifest,
+  scopeManifestFrom,
   buildScopeStrip,
   num,
   reportVerdict,
@@ -78,8 +79,7 @@ import {
 // says the desktop is the reason: the shell must write into the same file the
 // CLI writes into, or a later `diffRuns` reads a timeline with a seam in it
 // that nothing marks. Imported, never copied.
-import { RunHistory } from '@ledar/store';
-import type { RuleRun } from '@ledar/store';
+import { RunHistory, ruleRunsFrom } from '@ledar/store';
 
 import type { ReportFinding, ScanOutcome, SessionHandle } from '../shared/ipc.js';
 import { SCHEMAS } from './connect-flow.js';
@@ -106,49 +106,6 @@ function why(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-/**
- * The connector's scope report, in the shape the contracts package validates.
- *
- * ⚠️ A second copy of `manifestFrom` in apps/cli/src/scan.ts. It is duplicated
- * rather than imported because apps/cli is not a dependency of this app and
- * the function lives in neither package — REPORTED upward rather than fixed
- * here, since moving it is a change to files this slice does not own.
- *
- * The one line that needed a decision is `totalTables`, and the CLI's reason
- * is repeated here because a copy that keeps the code and drops the reason is
- * a copy that gets "simplified" back into the bug. Handing it
- * `tablesInRequestedSchemas` compiles, reads naturally, and is a lie: that
- * number counts tables in the schemas the scan was pointed at, so on a
- * Supabase project it renders as "35 of 35 tables — all of them" about a
- * database holding 76. Numerator: coverage. Denominator: existence. Neither is
- * inferred from the other.
- *
- * `schemas` is the GRANTED list, not the requested one — a schema that was
- * asked for and refused was not in scope no matter what was asked.
- */
-function manifestFrom(scope: ScopeReport, verdict: PrivilegeVerdict): ScopeManifest {
-  return {
-    database: scope.database,
-    role: scope.role,
-    schemas: scope.schemasGranted,
-    visibleTables: scope.tablesReadable,
-    totalTables: scope.tablesInDatabase,
-    grantedAt: scope.grantedAt,
-    readOnlyEnforcedByDatabase: verdict.kind === 'read_only_enforced',
-    disclosure: disclosureFor(verdict),
-  };
-}
-
-/**
- * A claim that reports having found nothing, rather than something.
- *
- * Hoisted so the verdict's arithmetic and the report's sections read the same
- * list the same way. Debt N8 split the claim kinds precisely so that nothing
- * downstream could read an abstention as a result: `kind !== 'negative'` alone
- * would count "I checked 40 things and can conclude nothing" as something
- * raised, and hand that report the verdict written for a report that found
- * something.
- */
 function saysNothingFound(f: Finding): f is StatesABoundary {
   return f.kind === 'negative' || f.kind === 'abstained';
 }
@@ -250,7 +207,13 @@ export async function runScanFlow(handle: unknown): Promise<ScanOutcome> {
     // Checked before anything is said in its name. A manifest whose two
     // denominators cannot both be true is a scope nobody can rely on, and a
     // report without a scope it can rely on should not be rendered at all.
-    const manifest = assertScopeManifest(manifestFrom(scope, verdict));
+    const manifest = assertScopeManifest(
+      scopeManifestFrom(
+        scope,
+        verdict.kind === 'read_only_enforced',
+        disclosureFor(verdict),
+      ),
+    );
 
     history = await RunHistory.open(dsn, manifest, LANG);
 
@@ -338,28 +301,30 @@ export async function runScanFlow(handle: unknown): Promise<ScanOutcome> {
      * a history claiming a version the rule was not running is worse than one
      * claiming none.
      */
-    const layerARuns: RuleRun[] = layerA.rules.map((r) => ({
-      rule: r.rule,
-      ran: r.ran,
-      ruleVersion: LAYER_A_RULE_VERSION,
-      coverage: {
-        checked: r.checked,
-        eligible: r.eligible,
-        skipped: [],
-        // Layer A never samples: it counts every offending row up to a
-        // ceiling, and a ceiling is `truncatedAt`, not a sample.
-        visibleToRole: null,
-        verified: r.checked,
-        sampled: 0,
-        excluded: 0,
-        truncatedAt: null,
-      },
-      note:
-        r.notChecked > 0
-          ? `${r.notChecked} of ${r.eligible} targets were not checked. The ` +
-            `report names them; this record keeps the count.`
-          : null,
-    }));
+    const layerARuns = ruleRunsFrom(
+      layerA.rules.map((r) => ({
+        rule: r.rule,
+        ran: r.ran,
+        coverage: {
+          checked: r.checked,
+          eligible: r.eligible,
+          skipped: [],
+          // Layer A never samples: it counts every offending row up to a
+          // ceiling, and a ceiling is `truncatedAt`, not a sample.
+          visibleToRole: null,
+          verified: r.checked,
+          sampled: 0,
+          excluded: 0,
+          truncatedAt: null,
+        },
+        note:
+          r.notChecked > 0
+            ? `${r.notChecked} of ${r.eligible} targets were not checked. The ` +
+              `report names them; this record keeps the count.`
+            : null,
+      })),
+      LAYER_A_RULE_VERSION,
+    );
 
     /**
      * What Layer B covered, in the only terms that can be stated honestly.

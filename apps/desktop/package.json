@@ -7,7 +7,11 @@
   "type": "module",
   "main": "dist/node/main/main.js",
   "dependencies": {
-    "@ledar/connector-postgres": "*"
+    "@ledar/connector-postgres": "*",
+    "@ledar/contracts": "*",
+    "@ledar/packs-layer-a": "*",
+    "@ledar/packs-layer-b": "*",
+    "@ledar/store": "*"
   },
   "devDependencies": {
     "@ledar/test-fixtures": "*",

@@ -300,7 +300,10 @@ describe('the SQL a user rule becomes', () => {
     );
 
     assert.throws(
-      () => buildRuleQuery(rule),
+      // `'text'` is passed so the refusal under test is the IDENTIFIER one.
+      // Passing `null` would refuse first, for the other reason, and the
+      // assertion would pass while measuring nothing about `quoteIdent`.
+      () => buildRuleQuery(rule, 'text'),
       (err: unknown) => err instanceof Error && /not a plain identifier/.test(String(err)),
     );
   });
@@ -318,6 +321,6 @@ describe('the SQL a user rule becomes', () => {
       { 'public.film': ['film_id'] },
     );
 
-    assert.throws(() => buildRuleQuery(rule), /nothing to run/);
+    assert.throws(() => buildRuleQuery(rule, null), /nothing to run/);
   });
 });

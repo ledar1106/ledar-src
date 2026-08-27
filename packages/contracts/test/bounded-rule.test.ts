@@ -24,6 +24,7 @@ import {
   sealRule,
 } from '../src/bounded-rule.js';
 import type { SchemaCatalog } from '../src/bounded-rule.js';
+import { missingMeaningSentence } from '../src/missing-policy.js';
 import { assertNoDefectWords } from '../src/findings.js';
 
 /** The database that was scanned — the whole vocabulary a rule may use. */
@@ -207,10 +208,67 @@ describe('what a model may turn a typed sentence into', () => {
   });
 });
 
+describe('renderRule carries what "empty" will mean', () => {
+  const MISSING_RULE = {
+    expressible: true,
+    check: 'is-never-missing' as const,
+    table: 'public.users',
+    columns: ['email'],
+    references: null,
+    unsupported: [],
+  };
+  const CAT = { 'public.users': ['email'] };
+
+  it('🟥 appends the clause, because the policy was talking to nobody', () => {
+    // `missing-policy.ts` exists so the sentence and the SQL cannot disagree
+    // about what counts as empty. It had ZERO production callers: the clause
+    // was generated, tested, and shown to no one, while renderRule kept
+    // emitting only "leaves email empty" and left the reader to guess whether
+    // a column of nothing but spaces counts. AGENTS §4.3 — a gate nobody
+    // calls is not a gate, and this one sat on the single control the design
+    // says has to be read.
+    const sealed = sealRule(MISSING_RULE, CAT);
+
+    const withMeaning = renderRule(sealed, 'text', 'en');
+    const bare = renderRule(sealed, null, 'en');
+
+    assert.ok(withMeaning.length > bare.length, 'the clause did not arrive');
+    assert.ok(
+      withMeaning.endsWith(missingMeaningSentence('text', 'en')),
+      'the clause is not the one the policy wrote',
+    );
+    assert.equal(withMeaning.slice(0, bare.length), bare);
+  });
+
+  it('says something different for words than for a number', () => {
+    // If both admissions produced the same sentence, passing one would be
+    // ceremony. They must differ, or the parameter buys nothing.
+    const sealed = sealRule(MISSING_RULE, CAT);
+    assert.notEqual(renderRule(sealed, 'text', 'en'), renderRule(sealed, 'scalar', 'en'));
+  });
+
+  it('adds nothing to a check that does not turn on emptiness', () => {
+    const sealed = sealRule(
+      {
+        expressible: true,
+        check: 'is-never-repeated' as const,
+        table: 'public.users',
+        columns: ['email'],
+        references: null,
+        unsupported: [],
+      },
+      CAT,
+    );
+    // `text` is passed deliberately: a caller holding an admission must not
+    // get a blank-meaning clause stapled onto a uniqueness sentence.
+    assert.equal(renderRule(sealed, 'text', 'en'), renderRule(sealed, null, 'en'));
+  });
+});
+
 describe('the read-back, which is the only control in door ③', () => {
   it('says the table and the columns in every language', () => {
     for (const lang of LANGS) {
-      const said = renderRule(sealRule(ORPHAN_CHECK, CATALOG), lang);
+      const said = renderRule(sealRule(ORPHAN_CHECK, CATALOG), null, lang);
       assert.match(said, /public\.votes/);
       assert.match(said, /post_id/);
       assert.match(said, /public\.posts\.id/);
@@ -223,8 +281,7 @@ describe('the read-back, which is the only control in door ③', () => {
     // catalogue, so adding a check kind without a sentence goes red here.
     for (const lang of LANGS) {
       for (const check of RULE_CHECKS) {
-        const said = renderRule(
-          sealRule(
+        const said = renderRule(sealRule(
             {
               expressible: true,
               check,
@@ -234,14 +291,12 @@ describe('the read-back, which is the only control in door ③', () => {
               unsupported: [],
             },
             CATALOG,
-          ),
-          lang,
-        );
+          ), null, lang, );
         assert.ok(said.length > 20, `${check} in ${lang} rendered nothing worth reading`);
         assert.match(said, /email/);
       }
       for (const kind of UNSUPPORTED_KINDS) {
-        const said = renderRule(sealRule({ ...NOT_A_RULE, unsupported: [kind] }, CATALOG), lang);
+        const said = renderRule(sealRule({ ...NOT_A_RULE, unsupported: [kind] }, CATALOG), null, lang);
         assert.ok(said.length > 20, `${kind} in ${lang} rendered nothing worth reading`);
       }
     }
@@ -251,12 +306,12 @@ describe('the read-back, which is the only control in door ③', () => {
     for (const lang of LANGS) {
       for (const kind of UNSUPPORTED_KINDS) {
         assertNoDefectWords(
-          renderRule(sealRule({ ...NOT_A_RULE, unsupported: [kind] }, CATALOG), lang),
+          renderRule(sealRule({ ...NOT_A_RULE, unsupported: [kind] }, CATALOG), null, lang),
           `the read-back refusing ${kind} in ${lang} is read by a user`,
         );
       }
       assertNoDefectWords(
-        renderRule(sealRule(ORPHAN_CHECK, CATALOG), lang),
+        renderRule(sealRule(ORPHAN_CHECK, CATALOG), null, lang),
         `the read-back of a check in ${lang} is read by a user`,
       );
     }
@@ -267,8 +322,7 @@ describe('the read-back, which is the only control in door ③', () => {
     // read-back said the same thing for `public.users` and `public.badges`,
     // door ③ would have NO control in it at all, and the sentence in
     // bounded-rule.ts claiming otherwise would be false.
-    const meant = renderRule(
-      sealRule(
+    const meant = renderRule(sealRule(
         {
           expressible: true,
           check: 'is-never-repeated',
@@ -278,11 +332,8 @@ describe('the read-back, which is the only control in door ③', () => {
           unsupported: [],
         },
         CATALOG,
-      ),
-      'vi',
-    );
-    const hijacked = renderRule(
-      sealRule(
+      ), null, 'vi', );
+    const hijacked = renderRule(sealRule(
         {
           expressible: true,
           check: 'is-never-repeated',
@@ -292,9 +343,7 @@ describe('the read-back, which is the only control in door ③', () => {
           unsupported: [],
         },
         CATALOG,
-      ),
-      'vi',
-    );
+      ), null, 'vi', );
     assert.notEqual(meant, hijacked);
     assert.match(hijacked, /public\.badges/);
   });

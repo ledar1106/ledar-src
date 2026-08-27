@@ -282,6 +282,46 @@ export const EN: Catalog = {
   'rule.unsupported.names_nothing_here': () =>
     'does not name a table or column I can find here',
 
+  // What "empty" is about to mean, said before the query runs.
+  //
+  // "Empty" is a word two people read differently, and the one deciding
+  // whether to let a check loose on their database is entitled to the
+  // narrower reading in writing. Each of these is picked by the SAME closed
+  // value the predicate is built from — see `missing-policy.ts` — so the
+  // sentence and the SQL cannot describe two different rules.
+  //
+  // No parameters. The column's type name belongs in the refusal the runner
+  // throws, not in a sentence written for somebody who does not read types.
+  'rule.missing-means.text': () =>
+    'This column holds words, so a row counts as having nothing recorded ' +
+    'when it was left blank — and a value of nothing but blank spaces counts ' +
+    'as nothing recorded too, exactly the same as leaving it empty.',
+  // 🟥 Rewritten 2026-08-27, when enums joined this group. The old wording
+  // said "this column holds a number, a date or a yes-or-no", which is false
+  // of `film.rating`. A sentence that is wrong about the column it describes
+  // is the failure the whole missing policy exists to prevent, so the group
+  // widening forced the wording to widen with it. "such as" is load-bearing:
+  // the list is examples, not a claim that the group holds nothing else.
+  'rule.missing-means.scalar': () =>
+    'This column holds one whole value — such as a number, a date, a ' +
+    'yes-or-no, or one choice from a fixed set of choices. A row counts as ' +
+    'having nothing recorded only when nobody ever put anything in it. ' +
+    'Anything that was written down, including a zero or a choice picked ' +
+    'from the list, is a value and is not counted here.',
+  // 🟥 Rewritten the same day, when ranges joined this group. The old wording
+  // promised only that "an empty list" is a value, which says nothing about
+  // an empty range — and an empty range is exactly the case a reader of a
+  // range column would want the promise for.
+  'rule.missing-means.structured': () =>
+    'This column holds something with parts inside it — a list, a range, or ' +
+    'a structure — and only a row where nobody ever put anything in it is ' +
+    'counted. An empty list or an empty range is something somebody wrote ' +
+    'down on purpose, so it is a value and not a gap.',
+  'rule.missing-means.unsupported': () =>
+    'Nobody has decided what counts as empty for this kind of column, so this ' +
+    'check will not run on it. Declining is the deliberate answer: guessing ' +
+    'would hand you a confident number about a question nobody has settled.',
+
   // After a user's rule has run. Every one of these says whose rule it was,
   // and none of them calls a match a defect — `assertClaimDiscipline` would
   // refuse that anyway at `probable`, and the sentence should not want to.

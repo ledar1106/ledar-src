@@ -14,3 +14,5 @@ export * from './report-parts.js';
 export * from './set-aside.js';
 export * from './i18n.js';
 export * from './evidence-pack.js';
+export * from './scan-shapes.js';
+export * from './missing-policy.js';

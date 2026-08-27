@@ -264,6 +264,41 @@ export const VI: Catalog = {
   'rule.unsupported.names_nothing_here': () =>
     'không nêu tên bảng hay cột nào tôi tìm thấy ở đây',
 
+  // "Trống" nghĩa là gì với ĐÚNG cột này — nói ra TRƯỚC khi câu lệnh chạy.
+  //
+  // "Trống" là chữ mà hai người đọc ra hai nghĩa, và người đang quyết định
+  // có cho một phép kiểm chạy trên database của mình hay không có quyền đọc
+  // nghĩa hẹp hơn bằng chữ. Bốn câu này được chọn bằng ĐÚNG cái giá trị đóng
+  // đã sinh ra câu SQL (`missing-policy.ts`), nên câu chữ và câu lệnh không
+  // thể mô tả hai luật khác nhau.
+  //
+  // Không tham số. Tên kiểu dữ liệu nằm ở lời từ chối mà runner ném ra, chứ
+  // không nằm trong câu viết cho người không đọc kiểu.
+  'rule.missing-means.text': () =>
+    'Cột này chứa chữ, nên một dòng bị tính là chưa ghi gì khi nó bị bỏ ' +
+    'trống — và một giá trị chỉ toàn dấu cách cũng bị tính là chưa ghi gì, ' +
+    'y hệt như để trống.',
+  // 🟥 Viết lại 2026-08-27, khi enum vào nhóm này. Câu cũ nói "cột này chứa
+  // số, ngày tháng hoặc có-hay-không" — SAI về `film.rating`. Một câu sai về
+  // chính cột nó mô tả là đúng thứ luật này sinh ra để chặn.
+  'rule.missing-means.scalar': () =>
+    'Cột này chứa một giá trị nguyên khối — chẳng hạn một con số, một ngày ' +
+    'tháng, một có-hay-không, hoặc một lựa chọn trong một tập cố định. Một ' +
+    'dòng chỉ bị tính là chưa ghi gì khi chưa ai từng điền gì vào. Thứ đã ' +
+    'được ghi xuống, kể cả số 0 hay một lựa chọn lấy từ danh sách, đều là ' +
+    'giá trị và không bị tính vào đây.',
+  // 🟥 Viết lại cùng ngày, khi range vào nhóm này. Câu cũ chỉ hứa "một danh
+  // sách rỗng" là giá trị, không nói gì về một khoảng rỗng.
+  'rule.missing-means.structured': () =>
+    'Cột này chứa thứ có phần bên trong — một danh sách, một khoảng, hoặc ' +
+    'một cấu trúc — và chỉ dòng nào chưa ai từng điền gì mới bị tính. Một ' +
+    'danh sách rỗng hay một khoảng rỗng là thứ ai đó đã cố ý ghi vào, nên nó ' +
+    'là một giá trị chứ không phải một chỗ khuyết.',
+  'rule.missing-means.unsupported': () =>
+    'Chưa ai quyết định thế nào là trống với loại cột này, nên phép kiểm sẽ ' +
+    'không chạy trên nó. Từ chối chính là câu trả lời có chủ ý: đoán bừa sẽ ' +
+    'đưa cho bạn một con số nghe rất chắc chắn về một câu hỏi chưa ai chốt.',
+
   // Sau khi quy tắc của người dùng đã chạy. Câu nào cũng nói rõ đó là quy tắc
   // CỦA HỌ, và không câu nào gọi một chỗ khớp là khuyết tật — ở mức `probable`
   // thì `assertClaimDiscipline` cũng sẽ từ chối, nhưng câu chữ không nên muốn.

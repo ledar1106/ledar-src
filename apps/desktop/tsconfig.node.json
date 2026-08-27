@@ -3,10 +3,30 @@
   "compilerOptions": {
     "rootDir": "src",
     "outDir": "dist/node",
-    "types": ["node"]
+    "types": [
+      "node"
+    ]
   },
-  "include": ["src/main/**/*", "src/preload/**/*", "src/shared/**/*"],
+  "include": [
+    "src/main/**/*",
+    "src/preload/**/*",
+    "src/shared/**/*"
+  ],
   "references": [
-    { "path": "../../packages/connector-postgres" }
+    {
+      "path": "../../packages/connector-postgres"
+    },
+    {
+      "path": "../../packages/contracts"
+    },
+    {
+      "path": "../../packages/packs-layer-a"
+    },
+    {
+      "path": "../../packages/packs-layer-b"
+    },
+    {
+      "path": "../../packages/store"
+    }
   ]
 }

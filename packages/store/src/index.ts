@@ -30,3 +30,5 @@ export type {
   RunDiff,
 } from './diff.js';
 export type { OpenedHistory, RetiredHistory } from './retire.js';
+export { ruleRunsFrom } from './rule-runs.js';
+export type { PackRule } from './rule-runs.js';

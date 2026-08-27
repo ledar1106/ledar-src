@@ -34,6 +34,7 @@ import type {
 } from '@ledar/connector-postgres';
 import {
   assertScopeManifest,
+  scopeManifestFrom,
   buildScopeStrip,
   buildUserRuleSection,
   scopeStripByRule,
@@ -53,8 +54,7 @@ import {
   runImplicitForeignKeys,
   semanticQuestionFor,
 } from '@ledar/packs-layer-b';
-import { RunHistory } from '@ledar/store';
-import type { RuleRun } from '@ledar/store';
+import { RunHistory, ruleRunsFrom } from '@ledar/store';
 
 import { ledarDir } from './paths.js';
 import { wrap } from './text.js';
@@ -125,57 +125,6 @@ function why(err: unknown): string {
 }
 
 // ---- scope -----------------------------------------------------------------
-
-/**
- * The connector's scope report, in the shape the contracts package validates.
- *
- * One line here needed a decision, and it is `totalTables`. The obvious wiring
- * — hand it `tablesInRequestedSchemas` — compiles, reads naturally, and is a
- * lie: that number counts tables in the schemas this scan was pointed at, so
- * on a Supabase project it renders as "35 of 35 tables — all of them" about a
- * database holding 76. It is the same substitution as `GREATEST(reltuples, 0)`
- * reporting "nobody has run ANALYZE" as "0 rows", which this project has
- * already been bitten by once.
- *
- * So the manifest gets the number that was actually measured across the whole
- * database, and `visibleTables` stays what the scan could read inside the
- * schemas it was given. Numerator: coverage. Denominator: existence. Neither
- * is inferred from the other.
- *
- * `schemas` is the *granted* list rather than the requested one, because a
- * schema that was asked for and refused was not in scope no matter what the
- * command line said.
- */
-function manifestFrom(
-  scope: ScopeReport,
-  verdict: PrivilegeVerdict,
-): ScopeManifest {
-  return {
-    database: scope.database,
-    role: scope.role,
-    schemas: scope.schemasGranted,
-    visibleTables: scope.tablesReadable,
-    totalTables: scope.tablesInDatabase,
-    grantedAt: scope.grantedAt,
-    readOnlyEnforcedByDatabase: verdict.kind === 'read_only_enforced',
-    disclosure: disclosureFor(verdict),
-  };
-}
-
-// ---- history ---------------------------------------------------------------
-
-/**
- * Where the scan history file lives.
- *
- * Never inside the repository and never in the working directory. A history
- * is a record of somebody's databases; a file that lands wherever the terminal
- * happened to be is a file that gets committed by accident. `LEDAR_HISTORY_DB`
- * names one explicitly, which is what the test suite uses so it can read the
- * history back without touching the operator's own.
- */
-
-
-
 
 // ---- printing --------------------------------------------------------------
 
@@ -362,7 +311,13 @@ async function main(): Promise<number> {
     // Checked before anything is said in its name. A manifest whose two
     // denominators cannot both be true is a scope nobody can rely on, and a
     // report without a scope it can rely on should not be printed at all.
-    const manifest = assertScopeManifest(manifestFrom(scope, verdict));
+    const manifest = assertScopeManifest(
+      scopeManifestFrom(
+        scope,
+        verdict.kind === 'read_only_enforced',
+        disclosureFor(verdict),
+      ),
+    );
 
     const history = await RunHistory.open(dsn, manifest);
 
@@ -507,31 +462,34 @@ async function main(): Promise<number> {
      * an invented target name in a history file is worse than a number
      * stated in words beside it.
      */
-    const layerARuns: RuleRun[] = layerA.rules.map((r) => ({
-      rule: r.rule,
-      ran: r.ran,
-      // Debt N40. Taken from the pack that owns the rule, never typed here: a
-      // literal would go stale on the first bump, and a history claiming a
-      // version the rule was not running is worse than one claiming none.
-      ruleVersion: LAYER_A_RULE_VERSION,
-      coverage: {
-        checked: r.checked,
-        eligible: r.eligible,
-        skipped: [],
-        // Layer A never samples: it counts every offending row up to a
-        // ceiling, and a ceiling is `truncatedAt`, not a sample.
-        visibleToRole: null,
-        verified: r.checked,
-        sampled: 0,
-        excluded: 0,
-        truncatedAt: null,
-      },
-      note:
-        r.notChecked > 0
-          ? `${r.notChecked} of ${r.eligible} targets were not checked. The ` +
-            `report names them; this record keeps the count.`
-          : null,
-    }));
+    // Debt N40. The version is threaded in by `ruleRunsFrom` from the pack's
+    // own exported constant, never typed here: a literal would go stale on the
+    // first bump, and a history claiming a version the rule was not running is
+    // worse than one claiming none.
+    const layerARuns = ruleRunsFrom(
+      layerA.rules.map((r) => ({
+        rule: r.rule,
+        ran: r.ran,
+        coverage: {
+          checked: r.checked,
+          eligible: r.eligible,
+          skipped: [],
+          // Layer A never samples: it counts every offending row up to a
+          // ceiling, and a ceiling is `truncatedAt`, not a sample.
+          visibleToRole: null,
+          verified: r.checked,
+          sampled: 0,
+          excluded: 0,
+          truncatedAt: null,
+        },
+        note:
+          r.notChecked > 0
+            ? `${r.notChecked} of ${r.eligible} targets were not checked. The ` +
+              `report names them; this record keeps the count.`
+            : null,
+      })),
+      LAYER_A_RULE_VERSION,
+    );
 
     history.cover([
       ...layerARuns,

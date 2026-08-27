@@ -178,6 +178,16 @@ export type MessageKey =
   | 'rule.unsupported.needs_another_system'
   | 'rule.unsupported.not_about_rows'
   | 'rule.unsupported.names_nothing_here'
+  // ---- what "empty" will mean for THIS column ----
+  //
+  // One sentence per member of `MissingAdmission`, and the predicate that
+  // runs is built from the same closed value. See `missing-policy.ts`: the
+  // meaning used to be written twice — a sentence here and an `IS NULL` in
+  // the runner — and the two disagreed in shipped code.
+  | 'rule.missing-means.text'
+  | 'rule.missing-means.scalar'
+  | 'rule.missing-means.structured'
+  | 'rule.missing-means.unsupported'
   // ---- a user's own rule, after it RAN ----
   //
   // VS-6's other half. These are the only sentences in the product that

@@ -70,6 +70,8 @@
 import { z } from 'zod';
 
 import { t } from './i18n.js';
+import { missingMeaningSentence } from './missing-policy.js';
+import type { MissingAdmission } from './missing-policy.js';
 import type { Lang, MessageKey } from './i18n.js';
 
 /**
@@ -379,7 +381,32 @@ function listOf(parts: readonly string[], lang: Lang): string {
  * sentence and which identifiers; every word around them was written here, in
  * the language the reader asked for.
  */
-export function renderRule(rule: SealedRule, lang: Lang = 'en'): string {
+export function renderRule(
+  rule: SealedRule,
+  /**
+   * What "empty" will mean for this column, or `null` when the check does not
+   * turn on it.
+   *
+   * 🟥 REQUIRED, and required is the whole point. `missing-policy.ts` exists
+   * so the sentence and the SQL cannot disagree about what counts as empty —
+   * and it was doing that job with **zero production callers**. The sentence
+   * was generated, tested, and shown to nobody, while this function kept
+   * emitting the older wording that says only "empty" and leaves the reader
+   * to guess whether a column of spaces counts.
+   *
+   * A gate nobody calls is not a gate (AGENTS §4.3), and this one sat on the
+   * single control the design says has to be read. So the parameter is not
+   * optional: whoever builds the read-back has to answer *do I have the
+   * admission?* at compile time rather than discover the clause missing after
+   * a user has confirmed something.
+   *
+   * `null` is a real answer — `is-never-repeated` and
+   * `points-at-an-existing-row` do not turn on emptiness — and it has to be
+   * written out, so choosing it is a decision rather than an omission.
+   */
+  admission: MissingAdmission | null,
+  lang: Lang = 'en',
+): string {
   if (!rule.expressible) {
     const reasons = rule.unsupported.map((kind) =>
       t(lang, `rule.unsupported.${kind}` as MessageKey),
@@ -392,9 +419,17 @@ export function renderRule(rule: SealedRule, lang: Lang = 'en'): string {
   // public.users share the same public.users.email" — the identifier said
   // twice reads as boilerplate, and boilerplate is what an eye skips. This
   // sentence is the one control standing in door ③; it has to be read.
-  return t(lang, `rule.will-check.${rule.check!}` as MessageKey, {
+  const sentence = t(lang, `rule.will-check.${rule.check!}` as MessageKey, {
     table: rule.table!,
     columns: listOf(rule.columns, lang),
     target: rule.references ?? '',
   });
+
+  // The clause that says what "empty" counts, appended rather than folded in:
+  // the first sentence names the target, the second narrows the word. A reader
+  // skimming still meets the identifiers; a reader deciding gets the meaning.
+  if (rule.check === 'is-never-missing' && admission !== null) {
+    return `${sentence} ${missingMeaningSentence(admission, lang)}`;
+  }
+  return sentence;
 }
