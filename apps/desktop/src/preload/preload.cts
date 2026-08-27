@@ -11,10 +11,23 @@
  * passed on; validation lives in ipc.ts on the main side, where the
  * boundary actually is. What matters in this file is what is absent:
  * no Node globals leak, no ipcRenderer handle leaks, and the renderer
- * gets exactly the five calls the contract names.
+ * gets exactly the six calls the contract names.
+ *
+ * `scan` takes the session handle the connect outcome carried back, never a
+ * connection string. That is not this file's decision to make — there is no
+ * channel here that would accept one — but it is the shape a reader of this
+ * page should be able to confirm at a glance: after the first connect, the
+ * only thing this bridge can say about a database is its handle.
  */
 
-import type { ConnectOutcome, DevPrefill, GuideBundle, LedarBridge } from '../shared/ipc.js';
+import type {
+  ConnectOutcome,
+  DevPrefill,
+  GuideBundle,
+  LedarBridge,
+  ScanOutcome,
+  SessionHandle,
+} from '../shared/ipc.js';
 
 import electron = require('electron');
 
@@ -24,6 +37,8 @@ const api: LedarBridge = {
   guide: (): Promise<GuideBundle> => ipcRenderer.invoke('ledar:guide'),
   connect: (dsn: string): Promise<ConnectOutcome> =>
     ipcRenderer.invoke('ledar:connect', String(dsn)),
+  scan: (session: SessionHandle): Promise<ScanOutcome> =>
+    ipcRenderer.invoke('ledar:scan', String(session)),
   copyText: (text: string): Promise<boolean> =>
     ipcRenderer.invoke('ledar:copy-text', String(text)),
   devPrefill: (): Promise<DevPrefill> => ipcRenderer.invoke('ledar:dev-prefill'),

@@ -24,6 +24,7 @@ import { devPrefill } from './dev.js';
 import { registerIpc } from './ipc.js';
 import { hardenAllWebContents } from './security.js';
 import { APP_ORIGIN, registerAppProtocol } from './serve.js';
+import { closeAllSessions } from './session.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url)); // .../dist/node/main
 const PACKAGE_ROOT = resolve(HERE, '..', '..', '..'); // .../apps/desktop
@@ -86,6 +87,22 @@ if (!app.requestSingleInstanceLock()) {
   app.on('window-all-closed', () => {
     // Windows-first product (_doc/17 §7); no macOS dock-lingering behaviour.
     app.quit();
+  });
+
+  // Every credential this process is holding, dropped before it exits.
+  //
+  // `will-quit` rather than `window-all-closed` because it is the one event on
+  // the common path out: it fires for the menu, for the last window closing,
+  // for `app.quit()` called from the smoke run, and for the OS asking the app
+  // to stop. Hooking the window event instead would miss the quits that never
+  // had a window to close.
+  //
+  // What this genuinely buys is the interval between the last window going
+  // away and the process actually ending. A killed process needs no help —
+  // its memory goes with it — but a process that lingers with a DSN in a Map
+  // is a process that can still be attached to and dumped.
+  app.on('will-quit', () => {
+    closeAllSessions();
   });
 
   void app.whenReady().then(() => {

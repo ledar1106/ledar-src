@@ -22,6 +22,28 @@ if (gate.ok) {
   await gate.client.end();
 } else {
   announceSkip('desktop connect flow (pagila)', gate.reason);
+
+  /**
+   * 🟥 One counted marker, added 2026-08-27 after measuring what this file
+   * actually reported with the fixture down.
+   *
+   * `announceSkip` writes the reason to stderr, and the `describe` below is
+   * skipped — but a `describe`-level skip does NOT move the runner's
+   * counters. Measured: with `ledar-pagila` stopped this file printed
+   * `tests 4 · pass 4 · fail 0 · skipped 0`, which is indistinguishable from
+   * a clean run against a real database. Four tests vanished and the totals
+   * looked healthy.
+   *
+   * HANDOFF-STATUS §1b leans on `skipped > 0` as the tell that a container is
+   * lying down. For this file that tell was silent from the day it was
+   * written. AGENTS §4.2 already names the family — a test file that
+   * disappears takes its own absence with it.
+   */
+  describe('desktop connect flow (pagila) — not run', () => {
+    it('nothing was connected to a real database', { skip: gate.reason }, () => {
+      // Deliberately empty. `skipped > 0` is not green, and the handoff says so.
+    });
+  });
 }
 
 describe('runConnectFlow against the pagila fixture', { skip: !gate.ok }, () => {

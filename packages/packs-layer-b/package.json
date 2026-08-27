@@ -9,5 +9,13 @@
     "@ledar/connector-postgres": "*",
     "@ledar/contracts": "*",
     "pg": "^8.13.1"
+  },
+  "exports": {
+    ".": {
+      "ledar-built": "./dist/index.js",
+      "default": "./src/index.ts"
+    },
+    "./dist/*": "./dist/*",
+    "./package.json": "./package.json"
   }
 }

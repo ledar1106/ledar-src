@@ -28,6 +28,20 @@ describe('the English catalogue', () => {
     assert.ok(!/\{[a-z]+\}/.test(timeouts), 'a parameter survived unfilled');
   });
 
+  it('never promises the read-back without the branch where it is refused', () => {
+    // The first real person to finish the interview wrote a rule about a
+    // number — the one shape `bounded-rule` declines outright. The copy at
+    // the time promised, flatly, to say back "which table and which column",
+    // which for that sentence was never going to happen.
+    //
+    // The half pinned here is the half a tightening edit deletes first,
+    // because on its own the promise reads cleaner. It is not decoration:
+    // without it the screen states an outcome the product cannot guarantee.
+    const then = t('interview.done.rule.then');
+    assert.match(then, /If I cannot/);
+    assert.match(t('interview.done.rule.next'), /may turn out I cannot/);
+  });
+
   it('keeps the acceptance sentence exactly as the contract writes it', () => {
     // _doc/25 S2 and the audited demo agree on this headline, em dash and
     // capitals included. The screen quoting it differently would be the

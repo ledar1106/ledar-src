@@ -16,6 +16,11 @@ export { RetiredHistoryReader } from './legacy.js';
 export { HistoryTimeline, handlePrefix, retiredSiblings } from './timeline.js';
 export type { TimelineEntry } from './timeline.js';
 export { diffRuns } from './diff.js';
+// Moved out of apps/cli on 2026-08-27 so the desktop can write runs to the
+// SAME history file the CLI writes to. Two surfaces with two histories is a
+// timeline with an unmarked seam in it.
+export { RunHistory, identityFrom } from './run-history.js';
+export { dataDir, ledarDir, historyFile } from './paths.js';
 export type {
   Absence,
   ChangeVerdict,

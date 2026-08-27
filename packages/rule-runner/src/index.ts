@@ -75,7 +75,14 @@ import type {
  * a change here must be attributable here. A shared version string would make
  * a user-rule change look like a Layer A release.
  */
-export const USER_RULE_VERSION = 'user-rules@1.0.0';
+export const USER_RULE_VERSION = 'user-rules@1.1.0';
+// 1.0.0 -> 1.1.0 on 2026-08-27: `is-never-missing` now counts a blank string
+// and a whitespace-only string as missing, where it counted only NULL before.
+// The bump is not bookkeeping. `diffRuns` refuses to attribute change across
+// a version boundary, and without it the next scan of a table like
+// `public.address` would show a count leaping 4 -> 1003 and report it as
+// something that happened to the DATA. Nothing happened to the data; the
+// question changed.
 
 /**
  * The ceiling on any count.
@@ -142,9 +149,29 @@ export function buildRuleQuery(rule: SealedRule): string {
 
   if (rule.check === 'is-never-missing') {
     const col = quoteIdent(rule.columns[0]!);
+    // 🟥 `IS NULL` alone until 2026-08-27, and the read-back above it has
+    // always promised "empty". Those are not the same set, and Pagila shows
+    // the gap at full size: `public.address.address2` holds 4 nulls and 999
+    // empty strings, so the old query answered 4 to a sentence a reader
+    // would price at 1003 (Sol audit, blocker 5).
+    //
+    // `::text` rather than a column-type branch, and the reason is a
+    // measurement rather than taste: an integer cast to text is never the
+    // empty string, so on `film.original_language_id` this predicate returns
+    // 1000 — exactly what `IS NULL` returned. One predicate is already right
+    // for every type, and a classifier would be machinery that changes no
+    // answer while adding a second place for the meaning to live.
+    //
+    // `btrim` because a column holding only spaces is empty to the person
+    // who asked, and this sentence is read by someone deciding whether to
+    // let a query run against their database.
     return `
       SELECT count(*)::int AS n
-      FROM (SELECT 1 FROM ${target} WHERE ${col} IS NULL LIMIT ${COUNT_LIMIT}) s
+      FROM (
+        SELECT 1 FROM ${target}
+        WHERE ${col} IS NULL OR btrim(${col}::text) = ''
+        LIMIT ${COUNT_LIMIT}
+      ) s
     `;
   }
 

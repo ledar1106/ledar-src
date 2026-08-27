@@ -8,5 +8,13 @@
   "main": "src/index.ts",
   "dependencies": {
     "@ledar/connector-postgres": "*"
+  },
+  "exports": {
+    ".": {
+      "ledar-built": "./dist/index.js",
+      "default": "./src/index.ts"
+    },
+    "./dist/*": "./dist/*",
+    "./package.json": "./package.json"
   }
 }

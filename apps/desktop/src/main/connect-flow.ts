@@ -14,10 +14,17 @@
  * that is always rolled back, and its outcome is reported either way
  * (hard rule 1b: read-only is the database's answer, not this app's claim).
  *
- * The DSN passes through this function and is never logged, never stored,
- * never echoed back in any outcome. pg's own error messages may name the
- * host or the user; they are shown to the person who typed them and go
- * nowhere else.
+ * The DSN passes through this function and is never logged and never echoed
+ * back in any outcome. pg's own error messages may name the host or the user;
+ * they are shown to the person who typed them and go nowhere else.
+ *
+ * It IS now kept, on exactly one path: a connection the database itself
+ * refused a write on opens a session in `session.ts`, and the outcome carries
+ * the handle rather than the string. This sentence used to read "never
+ * stored", which was true when the only screen was S2 and stopped being true
+ * the moment a second screen needed the same connection. A docstring whose
+ * reason has expired is worse than no docstring — it teaches the next reader
+ * something about the product that is not so (AGENTS.md §4.9 ③).
  */
 
 // The built entry, by full path, not the package name. The workspace's
@@ -35,15 +42,22 @@ import {
   inspectPrivileges,
   proveCannotWrite,
   readScope,
-} from '@ledar/connector-postgres/dist/index.js';
+} from '@ledar/connector-postgres';
 
 import type { ConnectOutcome, SessionFacts, WriteProbeFacts } from '../shared/ipc.js';
+import { openSession } from './session.js';
 
 /**
  * MVP scope, same constant the CLI uses. Widening this is a product decision
  * (which schemas the interview covers), not a parameter to thread through.
+ *
+ * Exported so `scan-flow.ts` scans the schemas this file proved rather than
+ * its own copy of the same list. Two literals would compile, read alike, and
+ * drift on the first widening — and the drift is the bad kind: the scan would
+ * be reporting on a scope the read-only proof above never covered, while
+ * every sentence on screen still says the connection was proved.
  */
-const SCHEMAS = ['public'];
+export const SCHEMAS = ['public'];
 
 /** A DSN longer than this is not a DSN. Caps what the renderer can send. */
 const MAX_DSN_LENGTH = 4096;
@@ -142,7 +156,19 @@ export async function runConnectFlow(dsn: unknown): Promise<ConnectOutcome> {
       };
     }
 
-    return { kind: 'read_only_enforced', session, probe, scope };
+    // The only branch that opens a session, and the only one entitled to.
+    //
+    // `refused` and `writable` fall out above with no handle and that is not
+    // an omission — `shared/ipc.ts` says why on the `handle` field, and the
+    // short version is that holding a credential open for a connection this
+    // product has just declined to vouch for would be keeping the key to a
+    // door it told the person not to walk through.
+    //
+    // Opened last, after every check has passed, so a throw between here and
+    // the top cannot leave a live session behind for a connection that never
+    // finished being proved.
+    const handle = openSession(dsn.trim());
+    return { kind: 'read_only_enforced', session, probe, scope, handle };
   } catch (err) {
     return {
       kind: 'connect_error',

@@ -49,6 +49,9 @@ const CATALOG: SchemaCatalog = {
   'public.damaged_sentinel_link': ['id', 'damaged_sentinel_id'],
   'public.rental': ['rental_id'],
   'public.film': ['film_id', 'title', 'original_language_id'],
+  // 4 NULL and 999 empty strings out of 1003 rows. Pagila ships it that way;
+  // no fixture was bent to produce this case, which is the point of using it.
+  'public.address': ['address_id', 'address2'],
 };
 
 const gate = await openPagila();
@@ -139,6 +142,32 @@ if (!gate.ok) {
 
       const out = await runRule(client, rule, new QueryBudget());
       assert.equal(out.findings[0]!.evidence?.rowCount, 1000);
+    });
+
+    it('counts a blank string as missing, because the read-back promised it would', async () => {
+      // 🟥 Sol audit 2026-08-27, blocker 5. The sentence renderRule prints is
+      // "no row leaves ADDRESS2 empty, and count the ones that do". The query
+      // was `IS NULL`, so on Pagila it answered 4 while 999 further rows hold
+      // the empty string. A person asked to confirm that sentence has no way
+      // to know it means only one of the two ways a column can be blank.
+      //
+      // The number here is 1003 - every row of public.address - and it is
+      // read off the fixture rather than off the implementation: 4 NULL plus
+      // 999 empty out of 1003.
+      const rule = sealRule(
+        {
+          expressible: true,
+          check: 'is-never-missing',
+          table: 'public.address',
+          columns: ['address2'],
+          references: null,
+          unsupported: [],
+        },
+        CATALOG,
+      );
+
+      const out = await runRule(client, rule, new QueryBudget());
+      assert.equal(out.findings[0]!.evidence?.rowCount, 1003);
     });
 
     it("holds: a rule that finds nothing says so, and says it is not a constraint", async () => {
