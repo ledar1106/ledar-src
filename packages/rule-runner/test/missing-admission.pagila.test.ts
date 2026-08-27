@@ -751,21 +751,36 @@ if (!gate.ok) {
           `a policy that ignored base types entirely would pass this law`,
       );
 
-      // §4.3 — an assertion over an empty set is always green, so the size of
-      // the set is stated rather than left to be discovered. Measured
-      // 2026-08-27: every base type outside `pg_catalog` in this fixture is an
-      // auto-generated array type, so the extension decision has no live
-      // candidate here and is measured over facts further down.
+      // 🟥 This asserted `=== 0` until 2026-08-27, and CI proved it wrong the
+      // first time it ran: the public workflow builds Pagila on
+      // `pgvector/pgvector:pg18`, which ships `vector`, `halfvec` and
+      // `sparsevec`. The local fixture is `postgres:18-alpine` and carries
+      // none, so the claim held here and failed there — debt N9 exactly, a
+      // thing measured on ONE environment.
+      //
+      // Asserting the absence of examples was the weaker test anyway. It now
+      // CLASSIFIES whatever the server happens to carry: true on both
+      // fixtures, and stronger on the one that carries more.
       const extensionCandidates = types.filter(
         (t) => t.typtype === 'b' && !t.isArray && t.schema !== 'pg_catalog',
       );
-      assert.equal(
-        extensionCandidates.length,
-        0,
-        `this fixture now has ${extensionCandidates.length} base types outside pg_catalog ` +
-          `(${extensionCandidates.map((t) => `${t.schema}.${t.name}`).join(', ')}). That is ` +
-          `not a failure — it means the extension branch finally has live examples, and ` +
-          `the note beside this assertion is now stale.`,
+      for (const t of extensionCandidates) {
+        const want = t.extension === 'citext' ? 'text' : 'unsupported';
+        assert.equal(
+          admitMissing([t]),
+          want,
+          `${t.schema}.${t.name} belongs to ${t.extension ?? 'no extension'} and should ` +
+            `admit as ${want}. An extension type nobody has decided about must decline, ` +
+            `never be cast to text and hoped over.`,
+        );
+      }
+      // §4.3 — a loop over an empty set is always green, so say which it was.
+      // Not asserted either way: one of the two fixtures legitimately has none.
+      console.error(
+        `    [note] extension base types measured: ${extensionCandidates.length}` +
+          (extensionCandidates.length === 0
+            ? ' (this server carries none; the CI fixture does)'
+            : ` (${extensionCandidates.map((t) => `${t.schema}.${t.name}`).join(', ')})`),
       );
     });
 
@@ -965,10 +980,12 @@ if (!gate.ok) {
     });
 
     it('an extension type nobody decided is refused; citext is the one that is not', async () => {
-      // ⚠️ Measured 2026-08-27: nothing in this fixture belongs to an
-      // extension, so this decision has no live example and is made over
-      // facts. The number is asserted so the absence is a measurement rather
-      // than an assumption.
+      // 🟥 This asserted `=== 0` and CI disagreed on its first run: the public
+      // fixture is built on `pgvector/pgvector:pg18` and owns six extension
+      // types, while the local one is plain `postgres:18-alpine`. The count is
+      // still read — a reader should know whether this ran against live
+      // examples — but it is no longer a claim about how many a server may
+      // have. The classification itself is asserted in the catalog sweep.
       const extensionTypes = await countOf(`
         SELECT count(*)::int AS n
         FROM pg_catalog.pg_depend d
@@ -976,11 +993,9 @@ if (!gate.ok) {
           AND d.refclassid = 'pg_extension'::regclass
           AND d.deptype = 'e'
       `);
-      assert.equal(
-        extensionTypes,
-        0,
-        `this fixture now has ${extensionTypes} extension-owned types, so this decision ` +
-          `has live examples and should be measured against them`,
+      console.error(
+        `    [note] extension-owned types on this server: ${extensionTypes}` +
+          (extensionTypes === 0 ? ' (decision measured over facts below)' : ''),
       );
 
       const asExtension = (name: string, extension: string | null): PgTypeLink[] => [
