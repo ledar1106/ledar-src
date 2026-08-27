@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <!-- Mirrors the header CSP in serve.ts; the header is the one that binds. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LEDAR</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <!-- Every visible string is set from the i18n catalogue in app.ts.
+       This document carries structure, templates, and nothing to read. -->
+  <div class="app-layout">
+    <aside class="app-sidebar" id="sidebar">
+      <div class="app-brand">
+        <span class="wordmark" id="brand-name"></span>
+        <span class="expansion" id="brand-expansion"></span>
+      </div>
+      <div class="side-section">
+        <span class="nav-label" id="status-label"></span>
+        <div class="side-status" id="side-status" data-state="none"></div>
+      </div>
+    </aside>
+    <main class="app-main">
+      <div class="chat-scroll" id="chat"></div>
+      <form class="composer" id="composer">
+        <label class="visually-hidden" for="composer-input" id="composer-label"></label>
+        <input id="composer-input" type="text" autocomplete="off" spellcheck="false" disabled>
+        <button id="composer-send" class="button primary" type="submit" disabled></button>
+      </form>
+    </main>
+  </div>
+  <div class="visually-hidden" role="status" id="announcer"></div>
+
+  <template id="icon-check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg></template>
+  <template id="icon-dash"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 12h12"/></svg></template>
+  <template id="icon-shield"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3 5 6v5c0 5 3 8 7 10 4-2 7-5 7-10V6z"/></svg></template>
+  <template id="icon-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></template>
+  <template id="icon-alert"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v6M12 16.5v.5"/></svg></template>
+
+  <script type="module" src="/app/renderer/app.js"></script>
+</body>
+</html>

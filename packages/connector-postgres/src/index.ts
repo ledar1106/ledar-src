@@ -8,7 +8,7 @@ export type {
   WritableTable,
 } from './privileges.js';
 
-export { buildReadOnlyRoleSql } from './role-sql.js';
+export { buildReadOnlyRoleSql, buildRevokeWriteSql } from './role-sql.js';
 export type { RoleSqlOptions } from './role-sql.js';
 
 export { readSchemaGraph, probeEmptyTables } from './schema.js';

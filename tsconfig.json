@@ -30,6 +30,9 @@
     },
     {
       "path": "apps/engine"
+    },
+    {
+      "path": "apps/desktop"
     }
   ]
 }

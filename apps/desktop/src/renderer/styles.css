@@ -1,0 +1,373 @@
+/*
+ * LEDAR desktop — visual system.
+ *
+ * Tokens and component shapes come from apps/demo/index.html, the audited
+ * visual standard (HANDOFF-STATUS §1): flat, 1px borders, no shadows, no
+ * gradients, Inter, radii 4/8/12, one solid neutral CTA per screen.
+ * The demo laid its screens out as a wizard; here the same vocabulary is
+ * arranged as what the product actually is — one conversation (_doc/21 §2,
+ * AGENTS §4.20): assistant turns on a raised surface, user turns bordered,
+ * no tails, no avatars, structured cards inside the flow.
+ */
+
+:root {
+  color-scheme: light;
+  --surface: #ffffff;
+  --surface-raised: #f4f4f1;
+  --surface-soft: #ecece7;
+  --surface-ink: #191917;
+  --text: #1b1b19;
+  --text-muted: #56616d;
+  --text-on-ink: #ffffff;
+  --border: #d8d8d1;
+  --border-strong: #9d9d95;
+  --accent: #145fb8;
+  --accent-soft: #eaf2fb;
+  --attention: #92510c;
+  --attention-soft: #fff5e7;
+  --ok: #47641c;
+  --ok-soft: #eef4e6;
+  --pending: #596676;
+  --pending-soft: #eef1f4;
+  --focus: #0c66d4;
+  --danger: #8c2f27;
+  --radius-input: 4px;
+  --radius-button: 8px;
+  --radius-card: 12px;
+  --ease: cubic-bezier(.2, .75, .25, 1);
+}
+
+* { box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--surface);
+  color: var(--text);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+  text-rendering: optimizeLegibility;
+}
+
+button, input, textarea { font: inherit; }
+button, a, summary, label { cursor: pointer; }
+button[disabled] { opacity: .45; cursor: not-allowed; }
+svg { display: block; }
+[hidden] { display: none !important; }
+
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---- shell ------------------------------------------------------------- */
+
+.app-layout {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  height: 100vh;
+}
+
+.app-sidebar {
+  padding: 18px 12px;
+  border-right: 1px solid var(--border);
+  background: #fafaf8;
+  overflow-y: auto;
+}
+
+.app-brand { display: grid; gap: 3px; padding: 4px 8px 24px; }
+.wordmark { font-size: 22px; font-weight: 820; letter-spacing: -.04em; }
+.expansion {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 6px;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+.expansion b { color: var(--text); }
+
+.side-section { display: grid; gap: 6px; padding: 0 8px; }
+.nav-label {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.side-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-button);
+  background: var(--surface);
+  font-size: 13px;
+  font-weight: 650;
+}
+.side-status .status-dot {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 auto;
+  border: 2px solid var(--pending);
+  border-radius: 50%;
+  background: transparent;
+}
+.side-status[data-state="enforced"] .status-dot { border-color: var(--ok); background: var(--ok); }
+.side-status[data-state="writable"] .status-dot,
+.side-status[data-state="refused"] .status-dot { border-color: var(--attention); background: var(--attention); }
+
+/* ---- conversation ------------------------------------------------------ */
+
+.app-main {
+  min-width: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  background: var(--surface);
+}
+
+.chat-scroll {
+  overflow-y: auto;
+  padding: 32px clamp(24px, 6vw, 72px) 16px;
+  scroll-behavior: smooth;
+}
+
+.turn {
+  max-width: 720px;
+  margin: 0 auto 20px;
+  animation: enter 220ms var(--ease) both;
+}
+@keyframes enter {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* Assistant: flat raised bubble, no tail, no avatar (_doc/22 §5). */
+.turn.assistant .bubble {
+  display: grid;
+  gap: 14px;
+  padding: 16px 18px;
+  border-radius: var(--radius-card);
+  background: var(--surface-raised);
+}
+
+/* User: 1px border, transparent, narrower, to the right. */
+.turn.user { display: flex; justify-content: flex-end; }
+.turn.user .bubble {
+  max-width: 85%;
+  padding: 10px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-card);
+  background: transparent;
+  font-size: 15px;
+}
+
+.turn p { margin: 0; max-width: 68ch; }
+.turn .lead { font-size: 17px; }
+
+/* ---- cards inside the flow --------------------------------------------- */
+
+.card {
+  display: grid;
+  gap: 12px;
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+}
+.card.attention { border-left: 3px solid var(--attention); background: var(--attention-soft); }
+.card.ok { border-left: 3px solid var(--ok); background: var(--ok-soft); }
+.card.pending { border-left: 3px solid var(--pending); background: var(--pending-soft); }
+
+.card h3 { margin: 0; font-size: 20px; line-height: 1.35; letter-spacing: -.015em; }
+.kicker {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.card-head { display: flex; justify-content: space-between; align-items: start; gap: 12px; }
+.meta { color: var(--text-muted); font-size: 13px; }
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 4px 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+.tag svg { width: 13px; height: 13px; }
+
+.steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
+.steps li { max-width: 68ch; }
+
+.mono, code, pre { font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; }
+
+.code-block {
+  position: relative;
+  margin: 0;
+  padding: 18px;
+  padding-right: 76px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-input);
+  background: var(--surface-raised);
+  overflow-x: auto;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre;
+}
+.card .code-block { background: var(--surface); }
+.code-block .button { position: absolute; top: 8px; right: 8px; background: var(--surface); }
+
+.fact-list { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.fact-list li { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+.fact-list .fact-icon { width: 16px; height: 16px; flex: 0 0 auto; color: var(--ok); }
+.fact-list li.fact-off .fact-icon { color: var(--attention); }
+
+.scope-lines { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.scope-lines li {
+  padding-left: 14px;
+  border-left: 2px solid var(--border-strong);
+  font-size: 14px;
+  color: #303940;
+}
+
+.proof { display: flex; gap: 14px; align-items: start; }
+.proof-icon {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border: 1px solid var(--ok);
+  border-radius: 50%;
+  color: var(--ok);
+}
+.proof-icon svg { width: 18px; height: 18px; }
+.card.attention .proof-icon { border-color: var(--attention); color: var(--attention); }
+.card.pending .proof-icon { border-color: var(--pending); color: var(--pending); }
+
+.writable-list { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; font-size: 13px; }
+.writable-list .privs { color: var(--text-muted); }
+
+/* Verbatim material from the database: wraps, never overflows the card. */
+.probe-detail { font-size: 13px; color: #3d474f; white-space: pre-wrap; overflow-wrap: anywhere; }
+.probe-bad { color: var(--attention); font-weight: 650; }
+
+details { margin: 0; }
+details summary { width: fit-content; color: var(--accent); font-weight: 650; }
+details .code-block { margin-top: 10px; }
+
+/* ---- form pieces ------------------------------------------------------- */
+
+.field { display: grid; gap: 7px; }
+.field label { font-size: 13px; font-weight: 700; }
+.field-row { display: flex; gap: 8px; }
+.field-row input { flex: 1 1 auto; min-width: 0; }
+.field input {
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-input);
+  background: var(--surface);
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 14px;
+}
+.field-hint { margin: 0; color: var(--text-muted); font-size: 13px; max-width: 68ch; }
+
+.actions { display: flex; flex-wrap: wrap; gap: 10px; }
+
+.button {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-button);
+  background: transparent;
+  color: inherit;
+  text-decoration: none;
+  font-weight: 650;
+  transition: background-color 160ms var(--ease), border-color 160ms var(--ease), transform 160ms var(--ease);
+}
+.button:hover:not([disabled]) { background: var(--surface-raised); border-color: var(--text); }
+.button:active:not([disabled]) { transform: translateY(1px); }
+.button.primary { border-color: var(--surface-ink); background: var(--surface-ink); color: var(--text-on-ink); }
+.button.primary:hover:not([disabled]) { background: #353531; }
+.button.small { min-height: 36px; padding: 6px 11px; font-size: 13px; }
+.button[aria-pressed="true"] { border-color: var(--text); background: var(--surface-soft); }
+.button .icon { width: 18px; height: 18px; flex: 0 0 auto; }
+
+.button.is-loading { position: relative; color: transparent !important; }
+.button.is-loading::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  border-right-color: transparent;
+  animation: buttonSpin .7s linear infinite;
+}
+@keyframes buttonSpin { to { transform: rotate(360deg); } }
+
+/* ---- composer ---------------------------------------------------------- */
+
+.composer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  padding: 14px clamp(24px, 6vw, 72px) 18px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+.composer input {
+  min-height: 44px;
+  padding: 10px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-button);
+  background: var(--surface);
+  color: var(--text);
+}
+.composer input:disabled { background: var(--surface-raised); cursor: not-allowed; }
+
+/* ---- motion discipline ------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+  .chat-scroll { scroll-behavior: auto; }
+}
+
+@media (max-width: 900px) {
+  .app-layout { grid-template-columns: 1fr; }
+  .app-sidebar { display: none; }
+}

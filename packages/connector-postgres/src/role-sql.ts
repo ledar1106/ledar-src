@@ -42,6 +42,33 @@ function quoteLiteral(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
 }
 
+/**
+ * The repair path for a connection that turned out to be writable.
+ *
+ * `buildRevokeSql` (scope.ts) takes everything away, reading included — it is
+ * the exit. This keeps the role but strips what made it unsafe, so the person
+ * can run it, reconnect, and let Postgres be asked again. It exists because
+ * telling somebody "your role can still write" without handing them the SQL
+ * that fixes it hands the problem back — the same contradiction
+ * `buildReadOnlyRoleSql` exists to solve.
+ */
+export function buildRevokeWriteSql(role: string, schemas: string[]): string {
+  const r = quoteIdent(role);
+  const lines = [
+    `-- Removes the write privileges from ${role}. Reading is untouched.`,
+    `-- Run it, then connect again — the result is proven, not assumed.`,
+    '',
+  ];
+  for (const schema of schemas) {
+    const s = quoteIdent(schema);
+    lines.push(`REVOKE INSERT, UPDATE, DELETE, TRUNCATE`);
+    lines.push(`  ON ALL TABLES IN SCHEMA ${s} FROM ${r};`);
+    lines.push(`ALTER DEFAULT PRIVILEGES IN SCHEMA ${s}`);
+    lines.push(`  REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLES FROM ${r};`);
+  }
+  return lines.join('\n');
+}
+
 export function buildReadOnlyRoleSql(opts: RoleSqlOptions): string {
   const role = quoteIdent(opts.roleName);
   const db = quoteIdent(opts.database);
