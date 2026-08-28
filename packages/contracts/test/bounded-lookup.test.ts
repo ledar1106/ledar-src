@@ -46,9 +46,10 @@ function edge(
     via,
     why: `declared foreign key on ${fromTable}.${via}`,
   };
-  return tier === 'measured'
-    ? { ...base, tier, matched: { of: 100, found: 98 } }
-    : ({ ...base, tier, matched: null } as EntityEdge);
+  const join = { from: [via], to: [via] };
+  if (tier === 'measured') return { ...base, tier, matched: { of: 100, found: 98 }, join };
+  if (tier === 'guessed') return { ...base, tier, matched: null, join: null };
+  return { ...base, tier, matched: null, join };
 }
 
 const GRAPH: EntityGraph = {

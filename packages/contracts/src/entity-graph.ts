@@ -112,6 +112,43 @@ export const MatchRate = z
 export type MatchRate = z.infer<typeof MatchRate>;
 
 /**
+ * The columns that actually line up, matched by position.
+ *
+ * 🟥 Added 2026-08-28 for debt N58, and the reason is worth reading before
+ * touching it: until then an edge recorded `via` and nothing else, so a route
+ * through the map could be DRAWN and could not be QUERIED. G3 needs to walk a
+ * route as a join, and there was no parent column anywhere to join onto.
+ *
+ * `via` is not that column and never was. For a composite key it is
+ * `columns.join(', ')` — a phrase for a person to read, not an identifier. So
+ * this carries both sides as lists, and the join condition is the pairing of
+ * them by index.
+ *
+ * ⚠️ The information was never missing from the system. `Constraint` in the
+ * connector has held `referencedColumns` since it was written, read straight
+ * out of `con.confkey`; it was `GraphSource` that declined to accept it and
+ * this file that had nowhere to put it. That is exactly what the `validated`
+ * paragraph below says about itself — *"the information was on the table and
+ * this function threw it away"* — happening a second time in the same file,
+ * which is why it is spelled out here rather than fixed quietly.
+ *
+ * The arities have to match. A three-column key joined against two columns is
+ * not a weaker edge, it is a join that returns the wrong rows, and Postgres
+ * cannot produce one: `conkey` and `confkey` are always the same length.
+ */
+export const JoinColumns = z
+  .object({
+    /** Columns on `from`, in order. */
+    from: z.array(z.string().min(1)).min(1),
+    /** Columns on `to`, in the SAME order. */
+    to: z.array(z.string().min(1)).min(1),
+  })
+  .refine((j) => j.from.length === j.to.length, {
+    message: 'the two sides of a join must name the same number of columns',
+  });
+export type JoinColumns = z.infer<typeof JoinColumns>;
+
+/**
  * 🟥 A union on `tier`, so `matched` exists on exactly the tier that earns it.
  *
  * It used to be one object with `matched` nullable everywhere, and a comment
@@ -137,17 +174,44 @@ export const EntityEdge = z.discriminatedUnion('tier', [
     // Postgres does not let a constraint it enforces have a bad rate, so
     // there is nothing here to count and no field to put a count in.
     matched: z.null().default(null),
+    // 🟥 Nullable, and the first version of this was NOT, which was wrong in a
+    // way worth keeping written down.
+    //
+    // Requiring it meant a constraint arriving without its parent columns had
+    // to be skipped — and skipping it DELETES a relationship the database
+    // actually declares. This file already has a paragraph about why demoting
+    // such an edge to `guessed` is worse than duplicating it; dropping it
+    // outright is worse still, and it is silent.
+    //
+    // So the edge survives and the join is visibly absent. A route through it
+    // can be drawn and cannot be walked, and G3's runner has to say which.
+    join: z.union([JoinColumns, z.null()]).default(null),
   }),
   z.object({
     ...edgeBase,
     tier: z.literal('measured'),
     matched: MatchRate,
+    // Required for the same reason `matched` is: a rate cannot be counted
+    // without knowing which column it was counted against. A measured edge
+    // with no join names a measurement nobody could have taken.
+    join: JoinColumns,
   }),
   z.object({
     ...edgeBase,
     tier: z.literal('guessed'),
     // Nothing was counted. That is what the tier means.
     matched: z.null().default(null),
+    // 🟥 Null, and this is the honest half of N58 rather than an oversight.
+    // `guessedEdges` matches a column name against a TABLE name; it never
+    // looks for a column on the other side, so there is no parent column to
+    // record. Inventing one — the primary key, say — would be the edge
+    // claiming a tier it never earned, which is the failure the union above
+    // already exists to prevent.
+    //
+    // The consequence is deliberate and load-bearing: a route containing a
+    // guessed edge still cannot be turned into a join, and G3's runner has to
+    // say so rather than quietly produce one.
+    join: z.null().default(null),
   }),
 ]);
 export type EntityEdge = z.infer<typeof EntityEdge>;
@@ -206,6 +270,8 @@ export function declaredEdges(
     readonly columns: readonly string[];
     readonly referencedSchema: string | null;
     readonly referencedTable: string | null;
+    /** The columns on the parent side, in the same order as `columns`. N58. */
+    readonly referencedColumns?: readonly string[];
     /**
      * The connector's word, not the pg catalog letter.
      *
@@ -305,6 +371,20 @@ export function declaredEdges(
     const via = c.columns.join(', ');
     if (via === '') continue;
 
+    // N58. `via` is the phrase a person reads; these are the identifiers a
+    // join needs, and they are two different things for a composite key.
+    //
+    // A source that did not carry them, or carried a list that does not line
+    // up, produces an edge with NO join rather than no edge. Postgres cannot
+    // produce a mismatched pair — `conkey` and `confkey` are the same length
+    // for every foreign key — so in practice this is the hand-assembled
+    // source, and losing its relationship would be the worse trade.
+    const onto = c.referencedColumns ?? [];
+    const join =
+      onto.length === c.columns.length && onto.length > 0
+        ? { from: [...c.columns], to: [...onto] }
+        : null;
+
     // Many partitions of one table carry many copies of one relationship. They
     // are the same edge once the parent's name is on them, so the later ones
     // are folded in rather than shown as a neighbour per month.
@@ -324,6 +404,7 @@ export function declaredEdges(
       from: owner,
       to: { schema: c.referencedSchema, table: c.referencedTable },
       via,
+      join,
       tier: 'declared',
       // Absent means validated: a caller that never knew about this had a key
       // Postgres was fully enforcing, and the common case keeps the short
@@ -647,6 +728,10 @@ export function guessedEdges(
       from: { schema: column.schema, table: column.table },
       to: { schema: target.schema, table: target.table },
       via: column.name,
+      // N58: a name matched a TABLE, not a column. Nothing here knows which
+      // column on the other side it would join to, and picking one would be a
+      // guess wearing a measurement's clothes.
+      join: null,
       tier: 'guessed',
       // Names the step, not the conclusion — so a person can disagree with the
       // reasoning rather than only with the answer.
@@ -684,6 +769,15 @@ export type GraphSource = {
     readonly columns: readonly string[];
     readonly referencedSchema: string | null;
     readonly referencedTable: string | null;
+    /**
+     * The columns on the other side, in the same order as `columns`.
+     *
+     * Added for N58. The connector has always read these; this type used to
+     * omit them, which is how a map that can be drawn but not queried came to
+     * exist. Optional so a caller assembling a source by hand still compiles,
+     * and an edge with no usable pair is skipped rather than guessed at.
+     */
+    readonly referencedColumns?: readonly string[];
     readonly kind: string;
     readonly validated?: boolean;
   }[];

@@ -29,9 +29,10 @@ function edge(tier: EntityEdge['tier'] = 'declared'): EntityEdge {
     via: 'a_id',
     why: 'a declared foreign key',
   };
-  return tier === 'measured'
-    ? { ...base, tier, matched: { of: 10, found: 9 } }
-    : ({ ...base, tier, matched: null } as EntityEdge);
+  const join = { from: ['a_id'], to: ['id'] };
+  if (tier === 'measured') return { ...base, tier, matched: { of: 10, found: 9 }, join };
+  if (tier === 'guessed') return { ...base, tier, matched: null, join: null };
+  return { ...base, tier, matched: null, join };
 }
 
 function hop(over: Partial<HopResult> = {}): HopResult {

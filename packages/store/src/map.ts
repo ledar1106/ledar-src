@@ -29,7 +29,7 @@ import type { DatabaseSync } from 'node:sqlite';
 
 import type { EntityEdge, EntityGraph } from '@ledar/contracts';
 
-import { int, intOrNull, text } from './rows.js';
+import { int, intOrNull, text, textOrNull } from './rows.js';
 import type { Row } from './rows.js';
 import { STORE_VOCABULARY } from './schema.js';
 
@@ -96,8 +96,9 @@ export function writeMap(db: DatabaseSync, fingerprint: string, graph: EntityGra
     `
     INSERT INTO entity_edge (
       database_id, from_schema, from_table, to_schema, to_table,
-      via, tier, why, matched_of, matched_found
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      via, tier, why, matched_of, matched_found,
+      join_from_json, join_to_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
   );
 
@@ -113,6 +114,12 @@ export function writeMap(db: DatabaseSync, fingerprint: string, graph: EntityGra
       edge.why,
       edge.matched === null ? null : edge.matched.of,
       edge.matched === null ? null : edge.matched.found,
+      // N58. Stringified here rather than in the contract: the contract holds
+      // lists because that is what a join is, and JSON is this file's way of
+      // putting a list in a column — the same shape `coverage_skipped_json`
+      // and `stated_picked_json` already use.
+      edge.join === null ? null : JSON.stringify(edge.join.from),
+      edge.join === null ? null : JSON.stringify(edge.join.to),
     );
   }
 }
@@ -141,7 +148,8 @@ export function readMap(db: DatabaseSync, fingerprint: string): EntityGraph | nu
     .prepare(
       `
       SELECT from_schema, from_table, to_schema, to_table,
-             via, tier, why, matched_of, matched_found
+             via, tier, why, matched_of, matched_found,
+             join_from_json, join_to_json
         FROM entity_edge
        WHERE database_id = ?
        ORDER BY from_schema, from_table, via, to_schema, to_table
@@ -163,18 +171,62 @@ export function readMap(db: DatabaseSync, fingerprint: string): EntityGraph | nu
       why: text(row, 'why'),
     };
 
+    // N58. Two columns back into one pair, and a row that cannot produce a
+    // usable pair is DROPPED for the same reason an unknown tier is: an edge
+    // whose join does not line up would join on the wrong columns, and a
+    // wrong join returns rows that look exactly like right ones.
+    const joinFrom = readColumnList(row, 'join_from_json');
+    const joinTo = readColumnList(row, 'join_to_json');
+    const joinBroken =
+      (joinFrom === null) !== (joinTo === null) ||
+      (joinFrom !== null && joinTo !== null && joinFrom.length !== joinTo.length);
+    if (joinBroken) continue;
+    const join = joinFrom === null || joinTo === null ? null : { from: joinFrom, to: joinTo };
+
     // The one check the DDL cannot reach from here: the contract's union pairs
     // `measured` with a rate and every other tier with null, and this is where
     // a row that satisfied `rate_belongs_to_measured` still has to be turned
-    // into one arm of that union rather than the other.
+    // into one arm of that union rather than the other. The join goes the same
+    // way — `guessed` takes null and the other two take a pair.
+    if (tier === 'guessed') {
+      if (of !== null || found !== null || join !== null) continue;
+      edges.push({ ...base, tier: 'guessed', matched: null, join: null });
+      continue;
+    }
     if (tier === 'measured') {
-      if (of === null || found === null) continue;
-      edges.push({ ...base, tier: 'measured', matched: { of, found } });
+      // A measured edge with no join is a rate nobody could have counted, so
+      // the row is dropped rather than promoted to a weaker tier — the same
+      // reasoning as the missing rate on the line above it.
+      if (of === null || found === null || join === null) continue;
+      edges.push({ ...base, tier: 'measured', matched: { of, found }, join });
       continue;
     }
     if (of !== null || found !== null) continue;
-    edges.push({ ...base, tier: tier as 'declared' | 'guessed', matched: null });
+    edges.push({ ...base, tier: 'declared', matched: null, join });
   }
 
   return { edges };
+}
+
+/**
+ * A stored JSON list of column names, or null when the column is null.
+ *
+ * Returns null for anything that is not a list of non-empty strings, which
+ * the caller treats as a broken row rather than an empty join. The DDL
+ * already refuses those shapes; this is the second lock, for a file written
+ * by something that was not this build.
+ */
+function readColumnList(row: Row, column: string): string[] | null {
+  const raw = textOrNull(row, column);
+  if (raw === null) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(parsed)) return null;
+  if (parsed.length === 0) return null;
+  if (!parsed.every((c) => typeof c === 'string' && c.trim() !== '')) return null;
+  return parsed as string[];
 }

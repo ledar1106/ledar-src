@@ -69,6 +69,7 @@ const DECLARED = EntityEdge.parse({
   tier: 'declared',
   why: 'the database enforces this with a foreign key',
   matched: null,
+  join: { from: ['customer_id'], to: ['customer_id'] },
 });
 
 const NOT_VALID = EntityEdge.parse({
@@ -80,6 +81,10 @@ const NOT_VALID = EntityEdge.parse({
     'the database has a foreign key for this, but it was declared NOT VALID — it holds ' +
     'for rows written from now on, and the rows already there were never checked against it',
   matched: null,
+  // N58: deliberately WITHOUT a join. A declared edge whose source did not
+  // carry the parent columns still asserts the relationship, and the round
+  // trip has to keep it that way rather than dropping the row.
+  join: null,
 });
 
 const MEASURED = EntityEdge.parse({
@@ -89,6 +94,9 @@ const MEASURED = EntityEdge.parse({
   tier: 'measured',
   why: '4,812 of 4,900 values here name a row in public.customer',
   matched: { of: 4900, found: 4812 },
+  // Required on this tier: nothing could have counted 4,812 without knowing
+  // which column on the other side it was counting against.
+  join: { from: ['customer_id'], to: ['customer_id'] },
 });
 
 const GUESSED = EntityEdge.parse({
@@ -160,6 +168,101 @@ describe('a map survives the window that built it', () => {
     store.saveMap(FINGERPRINT, { edges: [] }, AT);
     assert.deepEqual(store.loadMap(FINGERPRINT), { edges: [] });
     store.close();
+  });
+
+  it('🟥 a row whose join does not line up is dropped on the way back', () => {
+    // The DDL refuses this shape, so the reader's own check is unreachable
+    // through any writer here — which is exactly the state where a guard
+    // rots. `ignore_check_constraints` produces the one file that can hold
+    // it: one written by something that did not honour the CHECK.
+    //
+    // Dropped rather than repaired, for the reason an unknown tier is: a join
+    // that does not line up joins the wrong columns, and the rows that come
+    // back look exactly like right ones.
+    const path = historyPath();
+    const store = storeWithDatabase(path);
+    store.saveMap(FINGERPRINT, { edges: [] }, AT);
+    store.close();
+
+    const raw = new DatabaseSync(path);
+    try {
+      const id = (raw.prepare(`SELECT id FROM scanned_database LIMIT 1`).get() as { id: number }).id;
+      raw.exec('PRAGMA ignore_check_constraints = ON');
+      raw
+        .prepare(
+          `INSERT INTO entity_edge (
+             database_id, from_schema, from_table, to_schema, to_table,
+             via, tier, why, join_from_json, join_to_json
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          id,
+          'public',
+          'a',
+          'public',
+          'b',
+          'x, y',
+          'declared',
+          'the database enforces this with a foreign key',
+          '["x","y"]',
+          '["x"]',
+        );
+    } finally {
+      raw.close();
+    }
+
+    const back = ScanStore.open(path);
+    const read = back.loadMap(FINGERPRINT);
+    back.close();
+    assert.deepEqual(read?.edges, []);
+  });
+
+  it('🟩 the join survives the round trip, both sides and their order', () => {
+    // N58. The whole point of the bump: a route through the map has to come
+    // back joinable, and a join is a PAIRING — reversing one side silently
+    // joins the wrong columns to each other, which returns rows that look
+    // exactly like right ones.
+    const path = historyPath();
+    const store = storeWithDatabase(path);
+    const composite = EntityEdge.parse({
+      from: { schema: 'public', table: 'damaged_label_link' },
+      to: { schema: 'public', table: 'damaged_label' },
+      via: 'label_slug, label_key',
+      tier: 'declared',
+      why: 'the database enforces this with a foreign key',
+      matched: null,
+      join: { from: ['label_slug', 'label_key'], to: ['slug', 'key'] },
+    });
+    store.saveMap(FINGERPRINT, { edges: [composite] }, AT);
+    store.close();
+
+    const back = ScanStore.open(path);
+    const read = back.loadMap(FINGERPRINT);
+    back.close();
+
+    assert.equal(read?.edges.length, 1);
+    assert.deepEqual(read?.edges[0]?.join, {
+      from: ['label_slug', 'label_key'],
+      to: ['slug', 'key'],
+    });
+  });
+
+  it('🟩 a declared edge with no join comes back as an edge, not as nothing', () => {
+    // The relationship is still one the database declares. Dropping the row
+    // because this product could not work out the parent columns would delete
+    // something Postgres enforces, which is worse than the gap it came from.
+    const path = historyPath();
+    const store = storeWithDatabase(path);
+    store.saveMap(FINGERPRINT, { edges: [NOT_VALID] }, AT);
+    store.close();
+
+    const back = ScanStore.open(path);
+    const read = back.loadMap(FINGERPRINT);
+    back.close();
+
+    assert.equal(read?.edges.length, 1);
+    assert.equal(read?.edges[0]?.tier, 'declared');
+    assert.equal(read?.edges[0]?.join, null);
   });
 
   it('saving again replaces rather than accumulates', () => {
@@ -260,6 +363,98 @@ describe('what the FILE refuses, with this module out of the way', () => {
     // `trim()`, not `<> ''`. The exact hole found in
     // `verified_is_seen_and_agreed` the day this table was written.
     assert.throws(() => rawInsert(historyPath(), COLS, [...OK, 'declared', '   ']), /CHECK/);
+  });
+
+  it('🟥 a guessed edge carrying a join', () => {
+    // N58. `guessedEdges` matches a TABLE name and never looks for a column,
+    // so a guessed edge with a join is one that learned something nobody
+    // measured — the same shape as a match rate on a declared edge above.
+    assert.throws(
+      () =>
+        rawInsert(historyPath(), `${COLS}, join_from_json, join_to_json`, [
+          ...OK,
+          'guessed',
+          'the column is called "customer_id" and so is a table in this schema',
+          '["customer_id"]',
+          '["customer_id"]',
+        ]),
+      /join_belongs_to_a_named_column/,
+    );
+  });
+
+  it('🟥 a measured edge with no join', () => {
+    // A rate nobody could have counted: there is no other side to count
+    // against. Refused for the reason the missing rate is.
+    assert.throws(
+      () =>
+        rawInsert(historyPath(), `${COLS}, matched_of, matched_found`, [
+          ...OK,
+          'measured',
+          '9 of 10 values here name a row in public.customer',
+          10,
+          9,
+        ]),
+      /join_belongs_to_a_named_column/,
+    );
+  });
+
+  it('🟥 a join whose two sides are different lengths', () => {
+    // Not a weaker edge. A three-column key joined against two columns
+    // returns the WRONG ROWS, and they look exactly like right ones.
+    assert.throws(
+      () =>
+        rawInsert(historyPath(), `${COLS}, join_from_json, join_to_json`, [
+          ...OK,
+          'declared',
+          'the database enforces this with a foreign key',
+          '["a","b"]',
+          '["a"]',
+        ]),
+      /join_belongs_to_a_named_column/,
+    );
+  });
+
+  it('🟥 half a join', () => {
+    assert.throws(
+      () =>
+        rawInsert(historyPath(), `${COLS}, join_from_json`, [
+          ...OK,
+          'declared',
+          'the database enforces this with a foreign key',
+          '["a"]',
+        ]),
+      /join_belongs_to_a_named_column/,
+    );
+  });
+
+  it('🟥 a join that is not a list', () => {
+    assert.throws(
+      () =>
+        rawInsert(historyPath(), `${COLS}, join_from_json, join_to_json`, [
+          ...OK,
+          'declared',
+          'the database enforces this with a foreign key',
+          '"customer_id"',
+          '"customer_id"',
+        ]),
+      /join_belongs_to_a_named_column/,
+    );
+  });
+
+  it('🟥 an empty join', () => {
+    // Not "joined on nothing" — there is no such join, and a row saying so
+    // would be a cross product waiting for somebody to build it.
+    assert.throws(
+      () =>
+        rawInsert(historyPath(), `${COLS}, join_from_json, join_to_json`, [
+          ...OK,
+          'declared',
+          'the database enforces this with a foreign key',
+          '[]',
+          '[]',
+        ]),
+      /join_belongs_to_a_named_column/,
+    );
   });
 
   it('a tier nobody has heard of', () => {

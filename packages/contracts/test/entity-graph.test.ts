@@ -52,9 +52,13 @@ function edge(
   };
   // Built through the union rather than cast into it. A helper that casts
   // would let every test below assert against a shape the parser refuses.
-  return tier === 'measured'
-    ? { ...base, tier, matched: { of: 100, found: 97 } }
-    : { ...base, tier, matched: null };
+  //
+  // N58: the join goes where each tier earns it — a measured edge must name
+  // the columns its rate was counted against, a guessed one never can.
+  const join = { from: [via], to: [via] };
+  if (tier === 'measured') return { ...base, tier, matched: { of: 100, found: 97 }, join };
+  if (tier === 'guessed') return { ...base, tier, matched: null, join: null };
+  return { ...base, tier, matched: null, join };
 }
 
 describe('the three tiers', () => {
@@ -123,6 +127,146 @@ describe('the three tiers', () => {
       },
     ]);
     assert.equal(made[0]?.matched, null);
+  });
+});
+
+describe('the columns a route would join on — N58', () => {
+  it('a declared edge carries both sides, in order', () => {
+    const [edge] = declaredEdges([
+      {
+        schema: 'public',
+        table: 'rental',
+        columns: ['customer_id'],
+        referencedSchema: 'public',
+        referencedTable: 'customer',
+        referencedColumns: ['customer_id'],
+        kind: 'foreign_key',
+      },
+    ]);
+    assert.deepEqual(edge?.join, { from: ['customer_id'], to: ['customer_id'] });
+  });
+
+  it('🟥 a composite key keeps every column, and the pairing', () => {
+    // `via` is `columns.join(', ')` — a phrase for a person, not an
+    // identifier. This is the half a join can actually use, and the ORDER is
+    // the whole of it: swap one side and the query joins the wrong columns to
+    // each other and returns rows that look right.
+    const [edge] = declaredEdges([
+      {
+        schema: 'public',
+        table: 'damaged_label_link',
+        columns: ['label_slug', 'label_key'],
+        referencedSchema: 'public',
+        referencedTable: 'damaged_label',
+        referencedColumns: ['slug', 'key'],
+        kind: 'foreign_key',
+      },
+    ]);
+    assert.equal(edge?.via, 'label_slug, label_key');
+    assert.deepEqual(edge?.join, {
+      from: ['label_slug', 'label_key'],
+      to: ['slug', 'key'],
+    });
+  });
+
+  it('🟥 a source with no parent columns still yields the edge, without a join', () => {
+    // The relationship is one the database declares. Dropping it because this
+    // product could not work out the far side would delete something Postgres
+    // enforces — worse than the gap that produced it, and silent.
+    const made = declaredEdges([
+      {
+        schema: 'public',
+        table: 'rental',
+        columns: ['customer_id'],
+        referencedSchema: 'public',
+        referencedTable: 'customer',
+        kind: 'foreign_key',
+      },
+    ]);
+    assert.equal(made.length, 1);
+    assert.equal(made[0]?.join, null);
+  });
+
+  it('a pair that does not line up is no join, rather than a wrong one', () => {
+    const [edge] = declaredEdges([
+      {
+        schema: 'public',
+        table: 'a',
+        columns: ['x', 'y'],
+        referencedSchema: 'public',
+        referencedTable: 'b',
+        referencedColumns: ['x'],
+        kind: 'foreign_key',
+      },
+    ]);
+    assert.equal(edge?.join, null);
+  });
+
+  it('🟥 a guessed edge never invents one', () => {
+    // The guesser matched a TABLE name. It never looked for a column on the
+    // other side, so there is none to record, and picking the primary key
+    // would be a guess wearing a measurement's clothes.
+    const made = guessedEdges(
+      [
+        { schema: 'public', table: 'store' },
+        { schema: 'public', table: 'staff' },
+      ],
+      [{ schema: 'public', table: 'store', name: 'staff_id' }],
+      [],
+    );
+    assert.ok(made.length >= 1);
+    for (const edge of made) assert.equal(edge.join, null);
+  });
+
+  it('the type refuses a join whose sides are different lengths', () => {
+    assert.equal(
+      EntityEdge.safeParse({
+        from: { schema: 'public', table: 'a' },
+        to: { schema: 'public', table: 'b' },
+        via: 'x, y',
+        tier: 'declared',
+        why: 'the database enforces this with a foreign key',
+        matched: null,
+        join: { from: ['x', 'y'], to: ['x'] },
+      }).success,
+      false,
+    );
+  });
+
+  it('🟥 the TYPE refuses a guessed edge carrying a join', () => {
+    // The builder test above only proves `guessedEdges` does not produce one.
+    // A mutation that widened the TYPE left that test green, because a
+    // builder returning null still returns null under a laxer schema — so the
+    // rule needs asserting where it lives. Every future builder is covered by
+    // this one and by none of the others.
+    assert.equal(
+      EntityEdge.safeParse({
+        from: { schema: 'public', table: 'store' },
+        to: { schema: 'public', table: 'staff' },
+        via: 'manager_staff_id',
+        tier: 'guessed',
+        why: 'the column is called "manager_staff_id" and there is a table called "staff"',
+        matched: null,
+        join: { from: ['manager_staff_id'], to: ['staff_id'] },
+      }).success,
+      false,
+    );
+  });
+
+  it('🟥 the type refuses a measured edge with no join', () => {
+    // Same argument as the missing rate: nothing could have counted a match
+    // without knowing which column it counted against.
+    assert.equal(
+      EntityEdge.safeParse({
+        from: { schema: 'public', table: 'a' },
+        to: { schema: 'public', table: 'b' },
+        via: 'x',
+        tier: 'measured',
+        why: '9 of 10 values here name a row in public.b',
+        matched: { of: 10, found: 9 },
+      }).success,
+      false,
+    );
   });
 });
 

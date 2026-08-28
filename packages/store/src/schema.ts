@@ -125,7 +125,30 @@ import type { DatabaseSync } from 'node:sqlite';
  * forbade `picked_json` on those rungs and there was nowhere else to put it.
  * The moment a scan found anything, "Supabase and Stripe" became "yes".
  */
-export const SCHEMA_VERSION = 9;
+/**
+ * 9 → 10, `entity_edge.join_from_json` / `join_to_json` — debt N58.
+ *
+ * The map could be DRAWN and could not be QUERIED. An edge recorded `via`, the
+ * child column, and nothing about the other side, so a route through the map
+ * had no join condition anywhere in it — which is where G3 stopped when it
+ * went looking for one.
+ *
+ * `via` was never that column. For a composite key it is `columns.join(', ')`,
+ * a phrase for a person to read rather than an identifier, so the fix is two
+ * lists paired by position rather than one more name.
+ *
+ * ⚠️ The connector has read `referencedColumns` out of `con.confkey` since it
+ * was written. Nothing had to be measured again; the value was being dropped
+ * on the way in. `entity-graph.ts` has a paragraph saying exactly that about
+ * `convalidated`, one bump earlier, in the same function.
+ *
+ * 🟥 The cost, stated rather than discovered: this LOSES the histories on
+ * every machine that has one, because [[N4]] is deliberate and there is no
+ * migrator. `openHistory` moves the old file aside byte for byte and says
+ * where it went, so nothing is destroyed — but `npm run diff` cannot read
+ * across the seam, and that is the price of the column.
+ */
+export const SCHEMA_VERSION = 10;
 
 /**
  * The closed vocabularies, copied here on purpose — and tripwired.
@@ -942,10 +965,48 @@ const DDL: readonly string[] = [
     matched_of    INTEGER CHECK (matched_of    IS NULL OR matched_of    >= 0),
     matched_found INTEGER CHECK (matched_found IS NULL OR matched_found >= 0),
 
+    -- N58. The columns that line up, paired by position. \`via\` is the phrase
+    -- a person reads; these are the identifiers a join needs, and for a
+    -- composite key they are not the same thing.
+    join_from_json TEXT,
+    join_to_json   TEXT,
+
     CONSTRAINT rate_belongs_to_measured CHECK (
       (tier = 'measured') = (matched_of IS NOT NULL)
       AND (matched_of IS NULL) = (matched_found IS NULL)
       AND (matched_found IS NULL OR matched_found <= matched_of)
+    ),
+
+    -- 🔴 Both columns above sit here, before the first table CONSTRAINT, and
+    -- not beside the CHECK that governs them. A CREATE TABLE body is a
+    -- SEQUENCE: every column definition comes first, and once a named
+    -- constraint appears nothing after it may be a column. Placed lower this
+    -- read perfectly and SQLite answered "near join_from_json: syntax
+    -- error", naming the column rather than the rule — the same shape as the
+    -- manifest element that had to move earlier the same day.
+    --
+    -- The contract's union, pushed down into the file, exactly as
+    -- \`rate_belongs_to_measured\` above does for the rate. A \`guessed\` edge
+    -- matched a TABLE name and never looked for a column, so it has no join
+    -- and must not carry one; every other tier names both sides or is not
+    -- that tier.
+    CONSTRAINT join_belongs_to_a_named_column CHECK (
+      -- A guessed edge matched a TABLE name and never looked for a column.
+      (tier <> 'guessed' OR join_from_json IS NULL)
+      -- A rate cannot be counted without knowing what it was counted against.
+      AND (tier <> 'measured' OR join_from_json IS NOT NULL)
+      -- A declared edge may have either: the database names both sides, but a
+      -- source that did not carry them still declares the relationship, and
+      -- dropping it would delete something Postgres enforces.
+      AND (join_from_json IS NULL) = (join_to_json IS NULL)
+      AND (join_from_json IS NULL OR (
+        json_type(join_from_json) = 'array'
+        AND json_type(join_to_json) = 'array'
+        AND json_array_length(join_from_json) >= 1
+        -- A three-column key joined against two columns is not a weaker edge.
+        -- It is a join that returns the wrong rows, silently.
+        AND json_array_length(join_from_json) = json_array_length(join_to_json)
+      ))
     ),
 
     -- One relationship is one row. A table can point at the same parent twice
