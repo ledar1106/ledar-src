@@ -18,6 +18,7 @@ import {
   timelineFrom,
   timelineSaysNothing,
   timelineTier,
+  timelineWalkedEverything,
 } from '../src/timeline.js';
 import type { HopResult } from '../src/timeline.js';
 import type { EntityEdge } from '../src/entity-graph.js';
@@ -35,14 +36,26 @@ function edge(tier: EntityEdge['tier'] = 'declared'): EntityEdge {
   return { ...base, tier, matched: null, join };
 }
 
+/**
+ * A hop, with the invariant between `rows` and `unasked` kept by the helper.
+ *
+ * 🟥 `unasked` is DERIVED from `rows` rather than defaulted to null. The type
+ * says null-rows means somebody could not ask and `unasked` says which of the
+ * two reasons — so a helper that let a test write `rows: null, unasked: null`
+ * would manufacture a hop the runner cannot produce, and every assertion made
+ * against it would be about a state that does not exist. An override is still
+ * allowed, for the tests whose whole subject is the difference.
+ */
 function hop(over: Partial<HopResult> = {}): HopResult {
+  const rows = 'rows' in over ? (over.rows ?? null) : 3;
   return {
     entity: 'public.rental',
     via: 'customer_id',
     path: [edge()],
-    rows: 3,
+    rows,
     at: '2026-08-28T10:32:14Z',
     timeColumn: 'rental_date',
+    unasked: rows === null ? 'no-columns-to-join-on' : null,
     ...over,
   };
 }
@@ -195,5 +208,94 @@ describe('what the timeline refuses to imply', () => {
 
   it('has no tier to give when it has nothing to weigh', () => {
     assert.equal(timelineTier(timelineFrom('public.customer', [], [])), null);
+  });
+});
+
+describe('⑤ a ceiling is not a break, an empty table, or an unwalkable route', () => {
+  // 🟥 N59. Three different reasons a reader gets no number for a table, and
+  // the whole test is that they stay three. Before the budget there were two,
+  // and the pull to add the third onto `unwalkable` was strong: both are
+  // `rows: null`, both mean "no answer here". They lead somewhere different.
+  //
+  //   unwalkable    the map has no columns — nothing you do gets an answer
+  //   unreached     the walk stopped earlier — the data said no
+  //   unaffordable  this product decided to stop — ask again, spend more
+  //
+  // Someone told their schema is unwalkable goes and looks at their foreign
+  // keys. Someone told the ceiling was hit raises the ceiling. Fold the two
+  // and half of them do the wrong thing.
+  it('keeps the three lists apart in one timeline', () => {
+    const timeline = timelineFrom(
+      'public.customer',
+      [
+        hop({ entity: 'public.rental', rows: 2 }),
+        hop({ entity: 'public.invoice', rows: null, unasked: 'no-columns-to-join-on' }),
+        hop({ entity: 'public.payment', rows: 0, via: 'rental_id' }),
+        hop({ entity: 'public.refund', rows: 4 }),
+        hop({ entity: 'public.shipment', rows: null, unasked: 'budget-spent' }),
+      ],
+      [],
+      null,
+      'Stopped early: this answer is allowed 24 queries…',
+    );
+
+    assert.deepEqual(timeline.unwalkable, ['public.invoice']);
+    assert.deepEqual(timeline.unaffordable, ['public.shipment']);
+    // `refund` came after the break and is unreached — not empty, and not
+    // over budget either, which is the crossing this assertion pins down.
+    assert.deepEqual(timeline.unreached, ['public.refund']);
+    assert.equal(timeline.brokeAt?.at, 'public.payment');
+  });
+
+  it('🟥 says the account is incomplete when a ceiling cut it', () => {
+    // `timelineWalkedEverything` is the ONE door anybody asks "is this whole"
+    // through. A budget that cut four routes and left this true would be a
+    // ceiling that is honest in the type and invisible where it counts.
+    const cut = timelineFrom(
+      'public.customer',
+      [hop({ rows: 2 }), hop({ entity: 'public.payment', rows: null, unasked: 'budget-spent' })],
+      [],
+      null,
+      'Stopped early: …',
+    );
+    assert.equal(timelineWalkedEverything(cut), false);
+
+    const whole = timelineFrom('public.customer', [hop({ rows: 2 })], []);
+    assert.equal(timelineWalkedEverything(whole), true);
+  });
+
+  it('carries the sentence, and carries null when nothing was cut', () => {
+    const cut = timelineFrom(
+      'public.customer',
+      [hop({ entity: 'public.payment', rows: null, unasked: 'budget-spent' })],
+      [],
+      null,
+      'Stopped early: this answer is allowed 20 seconds of database time.',
+    );
+    assert.match(cut.cutShort ?? '', /Stopped early/);
+
+    // 🟥 Null, not an empty string. A renderer that prints `cutShort` when it
+    // is truthy would print a blank line for every whole timeline, and a
+    // renderer that prints it always would print nothing at all — the two
+    // failure modes the four meanings of zero produced elsewhere.
+    assert.equal(timelineFrom('public.customer', [hop({ rows: 1 })], []).cutShort, null);
+  });
+
+  it('does not let an unaffordable hop become a break', () => {
+    // A hop nobody asked about has no rows, and `rows: 0` is what a break is
+    // made of. If the budget's hops fell through to `askable` the FIRST
+    // refused route would read as "your data stops here" — a sentence about
+    // somebody's database that is really a sentence about our ceiling.
+    const timeline = timelineFrom(
+      'public.customer',
+      [
+        hop({ entity: 'public.rental', rows: 5 }),
+        hop({ entity: 'public.payment', rows: null, unasked: 'budget-spent' }),
+      ],
+      [],
+    );
+    assert.equal(timeline.brokeAt, null);
+    assert.equal(timeline.steps.length, 1);
+    assert.deepEqual(timeline.unaffordable, ['public.payment']);
   });
 });

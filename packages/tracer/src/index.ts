@@ -38,7 +38,8 @@
 
 import type { Client } from 'pg';
 
-import { qualified, quoteIdent } from '@ledar/connector-postgres';
+import { QueryBudget, qualified, quoteIdent } from '@ledar/connector-postgres';
+import type { BudgetLimits } from '@ledar/connector-postgres';
 import { refOf, resolveLookup, timelineFrom } from '@ledar/contracts';
 import type {
   EntityEdge,
@@ -62,6 +63,79 @@ const COUNT_LIMIT = 10000;
 /** How many other subjects to look at when counting similar cases. */
 const SIMILAR_LIMIT = 1000;
 
+/**
+ * What answering ONE question is allowed to cost somebody else's database.
+ *
+ * ## 🟥 Why this exists at all
+ *
+ * ㉜c measured a question containing the words *"follow every route"* turning
+ * two route walks into nine, four times out of four, in both languages. Every
+ * route it named was real, so `sealLookup` passed it — correctly: the seal
+ * answers *"does this route exist"*, and nobody had ever asked *"how many is
+ * too many"*. Nothing else in the product asked either.
+ *
+ * ## Why it is a BUDGET and not a cap on routes
+ *
+ * The obvious fix is `follow.length <= N`. The measurement says that is the
+ * wrong instrument. Costing every statement `runTrace` issues on Pagila:
+ *
+ * ```text
+ * route walks, one question:  24 · 2679 · 820 · 27 · 42 · 3749 · 230 · 173
+ *                             \____ a 156x spread between two "routes" ____/
+ * countSimilar, ONE query:    4566          ← 30% of the whole question
+ * ```
+ *
+ * A count treats the 24-block walk and the 3749-block walk as the same thing.
+ * Two routes can cost more than eight. So the ceiling is on what was SPENT,
+ * measured after each query, which is the rule `QueryBudget` already
+ * enforces everywhere else in this product — reusing it rather than writing a
+ * second one is the whole content of debt N57.
+ *
+ * ## Where the numbers come from
+ *
+ * Routes offered per subject, measured on all three benches:
+ *
+ * ```text
+ * chinook       11 subjects ·     50 routes · max   8 per subject
+ * pagila        37 subjects ·    144 routes · max  12 per subject
+ * musicbrainz  368 subjects · 24,174 routes · max 161 · median 47
+ * ```
+ *
+ * With `statement_timeout` at 60s, following all 161 is 2.7 hours of one
+ * person's question sitting on somebody's production database.
+ */
+export const ANSWER_LIMITS: BudgetLimits = {
+  /**
+   * Twice the largest menu any bench offers for one subject (Pagila's 12), so
+   * it cannot bind on a schema this product has actually been run against —
+   * and binds hard on MusicBrainz's 161. A backstop, not the operative limit:
+   * the 156x spread above is exactly why a count is a poor proxy for cost.
+   */
+  maxQueries: 24,
+  /**
+   * 🟥 A judgement, not a measurement, and it should be read as one. Nothing
+   * measured here says what a stranger's patience is worth. What IS measured
+   * is the shape of being wrong: a scan is a batch job and gets 120s, while
+   * this is a person who typed a question and is watching a cursor. 20s is
+   * already a long time to watch one. The disclosure is what makes a
+   * judgement survivable — a cut that announces itself can be argued with.
+   */
+  maxTotalMs: 20_000,
+  /**
+   * ⚠️ The weakest of the three, and worth saying so rather than letting it
+   * look like protection. The runner can only record rows it was RETURNED,
+   * and every walk is already `LIMIT COUNT_LIMIT`, so a route that seq-scans
+   * ten million rows to return four records four. It binds on many small
+   * results and never on one enormous scan; `statement_timeout` on the
+   * connection is what actually bounds that case.
+   *
+   * Set just above `maxQueries * COUNT_LIMIT` so it CAN bind rather than
+   * sitting at a value no run could ever reach, which would be a limit that
+   * looks like a limit and is not one.
+   */
+  maxRowsScanned: 250_000,
+};
+
 /** Which row of the subject table the question is about. */
 export type SubjectRow = {
   /** A column of the subject table. Must come from the catalog. */
@@ -74,6 +148,16 @@ export type TraceRequest = {
   readonly lookup: SealedLookup;
   readonly offer: LookupOffer;
   readonly subject: SubjectRow;
+  /**
+   * What this question may spend. A fresh `ANSWER_LIMITS` budget when absent.
+   *
+   * Optional so that the protection is on by DEFAULT and a caller has to work
+   * to remove it. The opposite arrangement — a required parameter — reads as
+   * more rigorous and is not: it means every call site decides, and one that
+   * passes a budget with no ceiling looks exactly like one that thought about
+   * it. Pass your own to share a ceiling across several questions.
+   */
+  readonly budget?: QueryBudget;
 };
 
 /** `schema.table` into halves. Both are needed to quote it. */
@@ -197,7 +281,15 @@ async function walkRoute(
 
   if (steps === null) {
     // ① Not zero. Nobody could ask.
-    return { entity: route.to, via: '(no columns recorded)', path: route.path, rows: null, at: null, timeColumn };
+    return {
+      entity: route.to,
+      via: '(no columns recorded)',
+      path: route.path,
+      rows: null,
+      at: null,
+      timeColumn,
+      unasked: 'no-columns-to-join-on',
+    };
   }
 
   const root = split(route.from);
@@ -252,6 +344,7 @@ async function walkRoute(
     rows: row?.n ?? 0,
     at: isoOf(row?.at),
     timeColumn,
+    unasked: null,
   };
 }
 
@@ -341,9 +434,36 @@ export async function runTrace(client: Client, req: TraceRequest): Promise<Timel
 
   const clocks = await timeColumns(client, [...tables]);
 
+  const budget = req.budget ?? new QueryBudget(ANSWER_LIMITS);
+
   const hops: HopResult[] = [];
   for (const route of resolved.routes) {
-    hops.push(await walkRoute(client, route, req.subject, clocks));
+    // Asked BEFORE the query, not after. `canAfford` records the refusal, so
+    // the reason survives into `disclosure()` whether or not anyone reads the
+    // hop — the same arrangement every other budgeted path in this product
+    // uses, and the reason the sentence can be written at all.
+    if (!budget.canAfford(`follow ${route.from} to ${route.to}`)) {
+      hops.push({
+        entity: route.to,
+        via: '(not asked)',
+        path: route.path,
+        rows: null,
+        at: null,
+        timeColumn: clocks.get(route.to) ?? null,
+        unasked: 'budget-spent',
+      });
+      // No `break`. The remaining routes are each refused in turn, on
+      // purpose: `unaffordable` then names every table a reader did not get
+      // an answer about, and stopping at the first would leave the rest
+      // absent from the account with nothing saying they exist.
+      continue;
+    }
+    const started = Date.now();
+    const hop = await walkRoute(client, route, req.subject, clocks);
+    // A hop with no columns to join on cost the database nothing — no query
+    // was built. Recording it would spend budget on a query nobody ran.
+    if (hop.unasked === null) budget.record(Date.now() - started, hop.rows ?? 0);
+    hops.push(hop);
   }
 
   // The similar-case count belongs to the break, so it is only asked for when
@@ -354,8 +474,22 @@ export async function runTrace(client: Client, req: TraceRequest): Promise<Timel
   const brokeIndex = hops.findIndex((h) => h.rows === 0);
   if (brokeIndex !== -1) {
     const route = resolved.routes[brokeIndex];
-    if (route !== undefined) similar = await countSimilar(client, route, req.subject);
+    // 🟥 Budgeted like a route walk, and it is the statement that most needed
+    // it: costed on Pagila it was 4566 blocks against a mean route walk of
+    // ~1000, so ONE break question is worth several route walks. It is also
+    // the only statement here whose aggregate has no row limit in front of
+    // it — `LIMIT` applies after `GROUP BY … HAVING`, so the whole subject
+    // table is grouped before anything is discarded.
+    //
+    // ③ stays intact when it cannot be afforded: `similar` remains null,
+    // which already means "nobody counted", and null is the honest answer for
+    // a count that was never run.
+    if (route !== undefined && budget.canAfford(`count others breaking at ${route.to}`)) {
+      const started = Date.now();
+      similar = await countSimilar(client, route, req.subject);
+      budget.record(Date.now() - started, similar ?? 0);
+    }
   }
 
-  return timelineFrom(subjectName, hops, req.lookup.outside, similar);
+  return timelineFrom(subjectName, hops, req.lookup.outside, similar, budget.disclosure('answer'));
 }

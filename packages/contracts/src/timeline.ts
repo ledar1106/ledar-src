@@ -45,6 +45,15 @@ import { pathTier } from './entity-graph.js';
 import type { EdgeTier, EntityEdge } from './entity-graph.js';
 import { OutsideKind } from './bounded-lookup.js';
 
+/**
+ * Why a hop was never asked about.
+ *
+ * A union rather than a boolean, because "we could not" and "we would not"
+ * lead a reader to do different things, and the sentence a renderer writes
+ * has to differ.
+ */
+export type UnaskedReason = 'no-columns-to-join-on' | 'budget-spent';
+
 /** One hop's worth of what was found, as the runner read it. */
 export type HopResult = {
   /** `schema.table` this hop landed on. */
@@ -65,8 +74,33 @@ export type HopResult = {
    *
    * Reporting the second as zero would tell a reader their data is missing
    * when what is missing is this product's ability to look.
+   *
+   * 🟥 Null now has TWO causes and `unasked` is which one. Folding them back
+   * together would undo the whole point of this field.
    */
   readonly rows: number | null;
+  /**
+   * Why nobody asked, or null when somebody did.
+   *
+   * 🟥 This exists because `rows: null` acquired a second meaning and a second
+   * meaning on the same null is how the four meanings of zero got here in the
+   * first place. The two are not interchangeable to a reader:
+   *
+   * ```text
+   * no-columns-to-join-on   this product CANNOT ask. Nothing you do changes
+   *                        it — the map records no columns for some edge on
+   *                        the route, so there is no join to build.
+   * budget-spent           this product COULD ask and chose not to, because
+   *                        answering this one question had already cost your
+   *                        database more than it is allowed. Ask again with a
+   *                        bigger ceiling and you get an answer.
+   * ```
+   *
+   * One is a limit of the map. The other is a decision made on the reader's
+   * behalf, and a decision made on somebody's behalf has to be visible or it
+   * is indistinguishable from an answer.
+   */
+  readonly unasked: UnaskedReason | null;
   /**
    * When the earliest of them happened, ISO, or null.
    *
@@ -143,6 +177,27 @@ export type Timeline = {
    * to join on. Not empty, not unreached — never askable.
    */
   readonly unwalkable: readonly string[];
+  /**
+   * Hops this product could have asked about and did not, because answering
+   * had already spent what it is allowed to spend of somebody's database.
+   *
+   * 🟥 The THIRD list, and it is none of the other two. `unreached` is the
+   * walk stopping because the data stopped; `unwalkable` is the map having
+   * nothing to join on; this is a ceiling being reached. Measured on
+   * MusicBrainz: one subject offers up to 161 routes, and a question that
+   * followed all of them would hold somebody's production database for the
+   * better part of an afternoon.
+   */
+  readonly unaffordable: readonly string[];
+  /**
+   * The sentence that has to appear when anything above was cut, or null.
+   *
+   * Carried on the timeline rather than left for a caller to remember,
+   * because `QueryBudget` already learned this lesson the hard way: *"a scan
+   * that stops early and says nothing produces a report indistinguishable
+   * from a complete one."* A cut timeline is exactly that shape.
+   */
+  readonly cutShort: string | null;
 };
 
 /**
@@ -157,6 +212,15 @@ export function timelineFrom(
   hops: readonly HopResult[],
   claimedOutside: readonly OutsideKind[],
   similar: number | null = null,
+  /**
+   * What the runner's budget has to say, or null when it cut nothing.
+   *
+   * A plain string, not a `QueryBudget`. This file decides what a timeline may
+   * claim and talks to no database; taking the budget object would drag the
+   * Postgres connector into a module whose whole point is that the suite can
+   * exercise it without a connection.
+   */
+  cutShort: string | null = null,
 ): Timeline {
   // ② The break is the first hop with nothing, and it ends the walk. Later
   // hops are not empty; they were never reached, and the two words mean
@@ -168,7 +232,15 @@ export function timelineFrom(
   // the rest of this function and no branch below has to re-handle a null
   // that has already been set aside.
   const askable = hops.filter((h): h is HopResult & { rows: number } => h.rows !== null);
-  const unwalkable = hops.filter((h) => h.rows === null).map((h) => h.entity);
+  // 🟥 Split by CAUSE, not by null. Before the budget existed there was one
+  // reason a hop had no rows and `h.rows === null` was the whole test; now
+  // there are two, and lumping a ceiling in with "the map cannot join this"
+  // would tell a reader their schema is unwalkable when what happened is that
+  // this product decided to stop.
+  const unwalkable = hops
+    .filter((h) => h.unasked === 'no-columns-to-join-on')
+    .map((h) => h.entity);
+  const unaffordable = hops.filter((h) => h.unasked === 'budget-spent').map((h) => h.entity);
 
   const breakIndex = askable.findIndex((h) => h.rows === 0);
   const reached = breakIndex === -1 ? askable : askable.slice(0, breakIndex);
@@ -233,6 +305,8 @@ export function timelineFrom(
     untimed,
     unreached,
     unwalkable,
+    unaffordable,
+    cutShort,
   };
 }
 
@@ -257,7 +331,13 @@ export function timelineSaysNothing(timeline: Timeline): boolean {
  * is answered in the same place: beside the result, not under it.
  */
 export function timelineWalkedEverything(timeline: Timeline): boolean {
-  return timeline.unwalkable.length === 0;
+  // 🟥 Both lists, and the second one was the point of adding this line. This
+  // predicate is the one place that answers *"is this account complete"*, and
+  // a budget that cut four routes makes it incomplete in precisely the way a
+  // guessed edge does. Leaving it checking only `unwalkable` would have meant
+  // the new ceiling was honest in the type and invisible at the only door
+  // anybody asks the question through.
+  return timeline.unwalkable.length === 0 && timeline.unaffordable.length === 0;
 }
 
 /**

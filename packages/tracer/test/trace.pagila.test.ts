@@ -27,11 +27,12 @@
 import assert from 'node:assert/strict';
 import { after, describe, it } from 'node:test';
 
-import { graphFrom, lookupOffer, sealLookup } from '@ledar/contracts';
+import { QueryBudget } from '@ledar/connector-postgres';
+import { graphFrom, lookupOffer, sealLookup, timelineWalkedEverything } from '@ledar/contracts';
 import type { GraphSource, LookupOffer } from '@ledar/contracts';
 import { announceSkip, openPagila } from '@ledar/test-fixtures';
 
-import { runTrace, timeColumns } from '../src/index.js';
+import { ANSWER_LIMITS, runTrace, timeColumns } from '../src/index.js';
 
 const SUITE = 'tracer against Pagila';
 
@@ -350,6 +351,228 @@ if (!gate.ok) {
       // timeline, this is where it would show up.
       assert.equal(asText.includes('MARY'), false);
       assert.equal(asText.includes('SMITH'), false);
+    });
+  });
+
+  describe(`${SUITE} — what one question may spend`, () => {
+    // 🟥 N59. ㉜c measured "follow every route" turning two walks into nine,
+    // 4/4, in both languages, with every route real so the seal passed it.
+    // MusicBrainz offers up to 161 routes from a single subject; at the 60s
+    // `statement_timeout` this role carries, following all of them is 2.7
+    // hours of one person's question on somebody's production database.
+    //
+    // These run against the real Pagila because a budget that works on a fake
+    // client proves the arithmetic and not the wiring, and the wiring is the
+    // part that was missing.
+
+    it('🟥 refuses the second route when only one query is affordable', async () => {
+      const budget = new QueryBudget({ ...ANSWER_LIMITS, maxQueries: 1 });
+      const timeline = await runTrace(client, {
+        lookup: choose(OFFER, ['public.rental', 'public.payment']),
+        offer: OFFER,
+        subject: { column: 'customer_id', value: 1 },
+        budget,
+      });
+
+      // One walked, one refused — and the refused one lands in the list that
+      // means "we stopped", not the one that means "your schema cannot be
+      // followed" and not the one that means "the data ran out".
+      assert.equal(timeline.steps.length, 1);
+      assert.equal(timeline.unaffordable.length, 1);
+      assert.deepEqual(timeline.unwalkable, []);
+      assert.deepEqual(timeline.unreached, []);
+      assert.equal(timeline.brokeAt, null);
+    });
+
+    it('🟥 says so, in a sentence, and admits the account is not whole', async () => {
+      const budget = new QueryBudget({ ...ANSWER_LIMITS, maxQueries: 1 });
+      const timeline = await runTrace(client, {
+        lookup: choose(OFFER, ['public.rental', 'public.payment']),
+        offer: OFFER,
+        subject: { column: 'customer_id', value: 1 },
+        budget,
+      });
+
+      // The whole point of `QueryBudget` in one assertion: *"a scan that stops
+      // early and says nothing produces a report indistinguishable from a
+      // complete one."* A cut timeline that reported itself whole would be
+      // that report.
+      assert.notEqual(timeline.cutShort, null);
+      assert.match(timeline.cutShort ?? '', /Stopped early/);
+      assert.equal(timelineWalkedEverything(timeline), false);
+    });
+
+    it('names EVERY route it could not afford, not just the first', async () => {
+      // The loop `continue`s rather than `break`s. With a break, a reader
+      // shown a one-hop timeline would have no way to learn that four other
+      // tables exist and went unasked — they would simply be absent, which is
+      // the shape of a complete answer.
+      const budget = new QueryBudget({ ...ANSWER_LIMITS, maxQueries: 0 });
+      const timeline = await runTrace(client, {
+        lookup: choose(OFFER, ['public.rental', 'public.payment']),
+        offer: OFFER,
+        subject: { column: 'customer_id', value: 1 },
+        budget,
+      });
+      assert.equal(timeline.unaffordable.length, 2);
+      assert.deepEqual([...timeline.unaffordable].sort(), ['public.payment', 'public.rental']);
+      assert.equal(timeline.steps.length, 0);
+    });
+
+    it('🟥 leaves `similar` null rather than skipping the break count silently', async () => {
+      // Customer 978 has no rentals, so the walk breaks and `countSimilar`
+      // would normally run — it is the single most expensive statement the
+      // tracer issues (4566 blocks against a mean route walk of ~1000 on this
+      // fixture). With one query's worth of budget it must not run, and the
+      // number must stay null: ③ already means "nobody counted", and a zero
+      // here would say "nobody else has this problem".
+      const budget = new QueryBudget({ ...ANSWER_LIMITS, maxQueries: 1 });
+      const timeline = await runTrace(client, {
+        lookup: choose(OFFER, ['public.rental']),
+        offer: OFFER,
+        subject: { column: 'customer_id', value: 978 },
+        budget,
+      });
+      assert.equal(timeline.brokeAt?.at, 'public.rental');
+      assert.equal(timeline.similar, null);
+      assert.notEqual(timeline.cutShort, null);
+    });
+
+    it('🟩 counts the break when there is budget for it', async () => {
+      // The other half, and the reason the assertion above is worth anything:
+      // with room, the same question DOES produce the count. A refusal test
+      // whose subject never succeeds is a test of a broken code path.
+      const timeline = await runTrace(client, {
+        lookup: choose(OFFER, ['public.rental']),
+        offer: OFFER,
+        subject: { column: 'customer_id', value: 978 },
+      });
+      assert.equal(timeline.brokeAt?.at, 'public.rental');
+      assert.equal(timeline.similar, 1);
+      assert.equal(timeline.cutShort, null);
+    });
+
+    it('does not spend budget on a route it could not have walked', async () => {
+      // A guessed edge records no columns, so no query is built and the
+      // database is never touched. Charging for it would let an unwalkable
+      // route push a walkable one over the ceiling — paying for silence.
+      //
+      // 🟥 The first version of this test used the ordinary offer, where every
+      // route IS walkable. It passed, and it would have gone on passing with
+      // the guard deleted, because the branch it claims to be about never
+      // ran. §4.16: a check that cannot go red is a check nobody has checked.
+      // So it walks the guessed offer, where the count MUST stay zero.
+      const guessedOnly = graphFrom({
+        tables: [
+          { schema: 'public', table: 'customer' },
+          { schema: 'public', table: 'rental' },
+        ],
+        columns: [{ schema: 'public', table: 'rental', name: 'customer_id' }],
+        constraints: [],
+      });
+      const offer = lookupOffer(guessedOnly);
+      const budget = new QueryBudget(ANSWER_LIMITS);
+      const timeline = await runTrace(client, {
+        lookup: choose(offer, ['public.rental']),
+        offer,
+        subject: { column: 'customer_id', value: 1 },
+        budget,
+      });
+
+      assert.deepEqual([...timeline.unwalkable], ['public.rental']);
+      // Nothing was asked of the database, so nothing was charged — and the
+      // ceiling is untouched for the routes that could have been walked.
+      assert.equal(budget.spend.queries, 0);
+      assert.equal(budget.exhausted, false);
+      // And it is not on the OTHER list: never askable is not the same as
+      // not asked, whatever the budget is.
+      assert.deepEqual(timeline.unaffordable, []);
+    });
+
+    it('leaves a two-route question alone', async () => {
+      const timeline = await runTrace(client, {
+        lookup: choose(OFFER, ['public.rental', 'public.payment']),
+        offer: OFFER,
+        subject: { column: 'customer_id', value: 1 },
+      });
+      assert.equal(timeline.steps.length, 2);
+      assert.equal(timeline.cutShort, null);
+      assert.equal(timelineWalkedEverything(timeline), true);
+    });
+
+    it('🟥 the DEFAULT ceiling binds — 30 real routes, 24 walked', async () => {
+      // 🟥 This test exists because the mutation run found the hole. The
+      // assertion above ("a caller who passed no budget is still protected")
+      // held identically with `ANSWER_LIMITS` and with a budget of a billion,
+      // because two routes never approach any ceiling. It proved the
+      // parameter was optional and NOTHING about the default being real —
+      // §4.16 exactly: a check that cannot go red is a check nobody checked.
+      //
+      // Pagila carries 55 real `payment_pYYYY_MM` partitions, every one of
+      // them a table with a `customer_id`. Thirty of them make thirty routes
+      // that genuinely run, on a real database, from one subject — which is
+      // more than any single Pagila subject offers naturally (12) and enough
+      // to cross `maxQueries: 24` for the first time.
+      const partitions = Array.from({ length: 30 }, (_, i) => {
+        const year = 2022 + Math.floor(i / 12);
+        const month = String((i % 12) + 1).padStart(2, '0');
+        return `payment_p${year}_${month}`;
+      });
+      const wide = graphFrom({
+        tables: [
+          { schema: 'public', table: 'customer' },
+          ...partitions.map((table) => ({ schema: 'public', table })),
+        ],
+        columns: [],
+        constraints: partitions.map((table) => ({
+          schema: 'public',
+          table,
+          columns: ['customer_id'],
+          referencedSchema: 'public',
+          referencedTable: 'customer',
+          referencedColumns: ['customer_id'],
+          kind: 'foreign_key' as const,
+        })),
+      });
+      const offer = lookupOffer(wide);
+      const timeline = await runTrace(client, {
+        lookup: choose(offer, partitions.map((t) => `public.${t}`)),
+        offer,
+        subject: { column: 'customer_id', value: 1 },
+      });
+
+      // 24 queries were affordable and the remaining 6 were not. Written
+      // against `ANSWER_LIMITS.maxQueries` rather than the literal 24, so
+      // that raising the ceiling changes what the test MEANS instead of
+      // breaking its arithmetic.
+      //
+      // 🟥 The break is the third term and it is not padding. Customer 1 has
+      // payments in some months and none in others, so one partition comes
+      // back empty and ends the walk — a hop that was asked about, is neither
+      // a step nor unreached, and still cost a query. The first version of
+      // this assertion left it out, read 23 where it expected 24, and the
+      // arithmetic being off by exactly one break is what says the four
+      // outcomes partition the routes rather than overlapping.
+      const asked =
+        timeline.steps.length + timeline.unreached.length + (timeline.brokeAt === null ? 0 : 1);
+      assert.equal(asked, ANSWER_LIMITS.maxQueries);
+      assert.equal(timeline.unaffordable.length, 30 - ANSWER_LIMITS.maxQueries);
+      assert.equal(timelineWalkedEverything(timeline), false);
+      assert.match(timeline.cutShort ?? '', /Stopped early/);
+      // And the sentence says which ceiling, because "stopped early" with no
+      // reason is the hedging a reader discounts.
+      assert.match(timeline.cutShort ?? '', /24 queries/);
+      // 🟥 An ANSWER, not a scan. The shared sentence is written for scans and
+      // said so verbatim to somebody who had run none — "this scan is allowed
+      // 24 queries" in reply to one typed question. The noun varies now, and
+      // a reader must never be sent looking for a report that does not exist.
+      assert.match(timeline.cutShort ?? '', /this answer is allowed/);
+      assert.equal(/this scan/.test(timeline.cutShort ?? ''), false);
+      // 🟩 The break count never ran: the ceiling was already reached by the
+      // time anything asked for it. `similar` stays null, which means "nobody
+      // counted" — and a 0 here would have told a reader that nobody else has
+      // this problem, on the strength of a query that was never issued.
+      assert.equal(timeline.similar, null);
     });
   });
 }

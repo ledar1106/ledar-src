@@ -133,7 +133,20 @@ export class QueryBudget {
    * Written for someone who will otherwise read "nothing found" as "nothing
    * is wrong".
    */
-  disclosure(): string | null {
+  disclosure(
+    /**
+     * What the reader was waiting for. `scan` for a scan; `answer` when one
+     * person asked one question.
+     *
+     * 🟥 Parameterised rather than copied. G3 routes a cut ANSWER through this
+     * sentence and it came out reading *"this scan is allowed 24 queries"* to
+     * somebody who had run no scan and asked a question. The tempting fix was
+     * a second `disclosure()` in the tracer — which is debt N57 exactly: two
+     * copies of one rule, agreeing today, diverging where only one of them is
+     * ever run. One writer, one noun that varies.
+     */
+    noun: 'scan' | 'answer' = 'scan',
+  ): string | null {
     if (this.denials.length === 0) return null;
     const first = this.denials[0]!;
     const reason: Record<keyof BudgetLimits, string> = {
@@ -142,10 +155,15 @@ export class QueryBudget {
       maxRowsScanned: `${first.ceiling.toLocaleString('en-US')} rows`,
     };
     const n = this.denials.length;
+    // "this report" is right for a scan and wrong for one answer, so the last
+    // sentence follows the noun too. A cut answer that told somebody to go
+    // and read a report would send them looking for a document that does not
+    // exist.
+    const artefact = noun === 'scan' ? 'this report' : 'this answer';
     return (
-      `Stopped early: this scan is allowed ${reason[first.limit]} against your ` +
+      `Stopped early: this ${noun} is allowed ${reason[first.limit]} against your ` +
       `database and reached that ceiling, so ${n} ${n === 1 ? 'check was' : 'checks were'} ` +
-      `not run. What is missing from this report is not the same as what is ` +
+      `not run. What is missing from ${artefact} is not the same as what is ` +
       `absent from your data.`
     );
   }
