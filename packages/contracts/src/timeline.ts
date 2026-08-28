@@ -53,8 +53,20 @@ export type HopResult = {
   readonly via: string;
   /** The edges walked to get here; the tier is taken from the weakest. */
   readonly path: readonly EntityEdge[];
-  /** How many rows related to the subject were found here. */
-  readonly rows: number;
+  /**
+   * How many rows related to the subject were found here, or null.
+   *
+   * 🟥 Null is NOT zero, and this is the fifth place in this product where
+   * that distinction has had to be made a type rather than a comment. Zero
+   * means the runner asked and the rows are not there — a break. Null means it
+   * could not ask at all, because some edge on the route records no columns to
+   * join on. A route through a `guessed` edge is exactly that: the map matched
+   * a table NAME and never found a column, so there is nothing to join.
+   *
+   * Reporting the second as zero would tell a reader their data is missing
+   * when what is missing is this product's ability to look.
+   */
+  readonly rows: number | null;
   /**
    * When the earliest of them happened, ISO, or null.
    *
@@ -73,6 +85,21 @@ export type TimelineStep = {
   readonly rows: number;
   readonly at: string | null;
   readonly tier: EdgeTier;
+  /**
+   * WHICH column the time was read from, or null when the table has none.
+   *
+   * 🟥 Carried all the way out to the reader, and it was missing here until a
+   * test tried to assert it and found nothing to assert. Rule ④'s header says
+   * the winning column "travels with the answer" — and it travelled as far as
+   * `HopResult` and stopped, so the sentence was true of the runner and false
+   * of the thing a person sees.
+   *
+   * It matters because choosing between several time columns is a NAMING
+   * rung, the same kind of evidence a guessed edge is. `created_at` beating
+   * `updated_at` is a convention. A reader who can see which column was read
+   * can disagree with it; one who cannot has to take the timeline on trust.
+   */
+  readonly timeColumn: string | null;
   /** True when this step's position comes from the route, not from a clock. */
   readonly placedWithoutTime: boolean;
 };
@@ -111,6 +138,11 @@ export type Timeline = {
   readonly untimed: readonly string[];
   /** Hops the break made unreachable. Not empty — never asked. */
   readonly unreached: readonly string[];
+  /**
+   * Hops that could not be walked at all, because the map records no columns
+   * to join on. Not empty, not unreached — never askable.
+   */
+  readonly unwalkable: readonly string[];
 };
 
 /**
@@ -129,15 +161,26 @@ export function timelineFrom(
   // ② The break is the first hop with nothing, and it ends the walk. Later
   // hops are not empty; they were never reached, and the two words mean
   // different things to somebody deciding what to go and fix.
-  const breakIndex = hops.findIndex((h) => h.rows === 0);
-  const reached = breakIndex === -1 ? hops : hops.slice(0, breakIndex);
-  const unreached = breakIndex === -1 ? [] : hops.slice(breakIndex + 1).map((h) => h.entity);
+  // A hop nobody could ask about is set aside first. It is neither a step nor
+  // a break: leaving it in the sequence would either invent a step with no
+  // rows behind it or stop the walk at a place the data never objected to.
+  // A type predicate rather than a plain filter, so `rows` is a number for
+  // the rest of this function and no branch below has to re-handle a null
+  // that has already been set aside.
+  const askable = hops.filter((h): h is HopResult & { rows: number } => h.rows !== null);
+  const unwalkable = hops.filter((h) => h.rows === null).map((h) => h.entity);
+
+  const breakIndex = askable.findIndex((h) => h.rows === 0);
+  const reached = breakIndex === -1 ? askable : askable.slice(0, breakIndex);
+  const unreached =
+    breakIndex === -1 ? [] : askable.slice(breakIndex + 1).map((h) => h.entity);
 
   const steps: TimelineStep[] = reached.map((h) => ({
     entity: h.entity,
     via: h.via,
     rows: h.rows,
     at: h.at,
+    timeColumn: h.timeColumn,
     tier: pathTier(h.path),
     placedWithoutTime: h.at === null,
   }));
@@ -163,9 +206,9 @@ export function timelineFrom(
 
   let brokeAt: TimelineBreak | null = null;
   if (breakIndex !== -1) {
-    const missing = hops[breakIndex]!;
+    const missing = askable[breakIndex]!;
     brokeAt = {
-      after: breakIndex === 0 ? subject : hops[breakIndex - 1]!.entity,
+      after: breakIndex === 0 ? subject : askable[breakIndex - 1]!.entity,
       at: missing.entity,
       via: missing.via,
       tier: pathTier(missing.path),
@@ -189,6 +232,7 @@ export function timelineFrom(
     outside: [...outside],
     untimed,
     unreached,
+    unwalkable,
   };
 }
 
@@ -202,6 +246,18 @@ export function timelineFrom(
  */
 export function timelineSaysNothing(timeline: Timeline): boolean {
   return timeline.steps.length === 0 && timeline.brokeAt === null;
+}
+
+/**
+ * ④ again, for the routes nobody could walk.
+ *
+ * A reader shown a short timeline is entitled to know whether it is short
+ * because the system is small or because this product could not follow half
+ * of it. That is the same question `notExamined` answers for a scan, and it
+ * is answered in the same place: beside the result, not under it.
+ */
+export function timelineWalkedEverything(timeline: Timeline): boolean {
+  return timeline.unwalkable.length === 0;
 }
 
 /**

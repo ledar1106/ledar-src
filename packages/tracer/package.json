@@ -1,0 +1,21 @@
+{
+  "name": "@ledar/tracer",
+  "version": "0.0.0",
+  "description": "Walks a route somebody asked about and says what happened, when, and where it stopped.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "dependencies": {
+    "@ledar/connector-postgres": "*",
+    "@ledar/contracts": "*",
+    "pg": "^8.13.1"
+  },
+  "exports": {
+    ".": {
+      "ledar-built": "./dist/index.js",
+      "default": "./src/index.ts"
+    },
+    "./dist/*": "./dist/*",
+    "./package.json": "./package.json"
+  }
+}

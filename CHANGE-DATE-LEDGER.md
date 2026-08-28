@@ -102,6 +102,7 @@ have no Change Date. They are listed here only so the boundary stays visible.
 | `packages/packs-layer-a` | Apache 2.0 | source public since 2026-08-22 · not on npm |
 | `packages/packs-layer-b` | Apache 2.0 | source public since 2026-08-22 · not on npm |
 | `packages/store` | Apache 2.0 | source public since 2026-08-22 · not on npm |
+| `packages/tracer` | Apache 2.0 | source public since 2026-08-28 · not on npm |
 | `packages/test-fixtures` | Apache 2.0 | source public since 2026-08-22 · `private: true`, never goes to npm |
 | `apps/cli` | Apache 2.0 | source public since 2026-08-22 · not on npm |
 | `apps/engine` | Apache 2.0 | created 2026-08-22 · not on npm |

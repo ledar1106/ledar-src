@@ -26,6 +26,9 @@
       "path": "packages/model-client"
     },
     {
+      "path": "packages/tracer"
+    },
+    {
       "path": "apps/cli"
     },
     {
