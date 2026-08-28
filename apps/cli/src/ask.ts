@@ -27,6 +27,7 @@
  * without putting the report at risk.
  */
 
+import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -34,14 +35,23 @@ import { fileURLToPath } from 'node:url';
 import {
   factsFromFinding,
   sealAnswer,
+  describeEgress,
   framePrompt,
+  grantEgress,
+  PermitLedger,
   langFromEnv,
   modelAdditionHeading,
   renderAnswer,
   withModelStep,
 } from '@ledar/contracts';
-import type { EvidenceFact, ModelStepState, SealedAnswer } from '@ledar/contracts';
-import { askModel } from '@ledar/model-client';
+import type {
+  EgressDisclosure,
+  EvidenceFact,
+  ModelStepState,
+  PromptParts,
+  SealedAnswer,
+} from '@ledar/contracts';
+import { askModel, outboundOf } from '@ledar/model-client';
 import type { ModelConfig } from '@ledar/model-client';
 import { AnswerCache, ScanStore } from '@ledar/store';
 
@@ -125,6 +135,54 @@ function loadConfig(): ModelConfig {
 function arg(name: string): string | null {
   const i = process.argv.indexOf(name);
   return i >= 0 ? (process.argv[i + 1] ?? null) : null;
+}
+
+/**
+ * The consent, retention and redaction versions this command sends under.
+ *
+ * One string because a permit compares them together and never separately —
+ * a caller able to match two of three would have a way to be partly right.
+ * It is a constant here because nothing in this command varies it; the day
+ * something does, this becomes an argument and every old permit stops
+ * matching, which is the correct thing to happen.
+ */
+const EGRESS_POLICY = 'consent=cli-explicit-send/1 retention=none/1 redaction=fence/1';
+
+/**
+ * How long a permit lives.
+ *
+ * Short, and short on purpose: consent is about a moment, and this one is
+ * granted and spent in the same breath. A generous window would only make it
+ * possible for the payload to change in between.
+ */
+const PERMIT_TTL_MS = 60_000;
+
+/**
+ * Prints what is about to leave, before anything leaves.
+ *
+ * `_doc/27` Module 4 requires that a person SEE the list — including schema,
+ * table and column names — before granting. On a command line that means
+ * printing it and stopping, because a disclosure that scrolls past on the way
+ * to a result is a disclosure nobody read.
+ */
+function printDisclosure(d: EgressDisclosure): void {
+  console.error('');
+  console.error('  ABOUT TO LEAVE THIS MACHINE');
+  console.error('');
+  console.error(`    to        ${d.destination}`);
+  console.error(`    class     ${d.dataClass}`);
+  console.error(`    size      ${d.bytes} bytes of your content`);
+  for (const b of d.blocks) {
+    console.error(`      · ${b.label} — ${b.bytes} bytes (${b.egressClass})`);
+  }
+  if (d.identifiers.length > 0) {
+    console.error('');
+    console.error('    names from your system that are in it:');
+    for (const line of wrap(d.identifiers.join(', '), 60)) {
+      console.error(`      ${line}`);
+    }
+  }
+  console.error('');
 }
 
 /**
@@ -233,9 +291,10 @@ async function main(): Promise<void> {
     let step: ModelStepState = 'not_configured';
     let addition: string | null = null;
 
+    let promptParts: PromptParts | undefined;
     let prompt;
     try {
-      prompt = framePrompt({
+      promptParts = {
         instruction: [
           'Answer using ONLY this JSON shape. No prose, no extra keys.',
           '',
@@ -260,7 +319,8 @@ async function main(): Promise<void> {
             content: question,
           },
         ],
-      });
+      };
+      prompt = framePrompt(promptParts);
     } catch (err) {
       // framePrompt refused — something classed `never-leaves` was in there.
       // That is D.5's `declined`, and the reader is told so rather than left
@@ -305,13 +365,64 @@ async function main(): Promise<void> {
       prompt = undefined;
     }
 
-    if (prompt) {
+    if (prompt && promptParts) {
+      /**
+       * Nothing leaves until the person running this has seen what leaves.
+       *
+       * `_doc/27` Module 4. On a command line "seeing it" is printing it and
+       * requiring a second, explicit act — `--send` — because a prompt that
+       * defaults to yes is a disclosure nobody read. The desktop will ask this
+       * differently; what may not differ is that a payload goes out only
+       * against a permit granted over its exact bytes.
+       */
+      const tier = config.tiers['answers']!;
+      const outbound = outboundOf(config, tier, prompt);
+      // The names of this finding's own schema, table and columns. Offered as
+      // candidates; `describeEgress` keeps the ones genuinely in the payload.
+      const disclosure = describeEgress(promptParts, outbound.destination, [
+        `${f.schema}.${f.table}`,
+        f.schema,
+        f.table,
+        ...f.columns,
+      ]);
+      printDisclosure(disclosure);
+
+      if (!process.argv.includes('--send')) {
+        // `declined` is D.5's word for "the model step did not happen and the
+        // reader is told so". The report below is unchanged either way, which
+        // is the invariant `withModelStep` exists to hold.
+        step = 'declined';
+        console.error(
+          '  (not sent: add --send to allow the payload above to leave this machine)',
+        );
+      } else {
+      // One ledger for this command. A permit is spent inside `askModel`,
+      // never here: a permit marked used by whoever remembered to is a
+      // permit that can be replayed by whoever did not.
+      const ledger = new PermitLedger();
+      const now = new Date().toISOString();
+      const permit = grantEgress({
+        disclosure,
+        body: outbound.body,
+        policy: EGRESS_POLICY,
+        now,
+        ttlMs: PERMIT_TTL_MS,
+        id: randomUUID(),
+      });
+
       const asked = await askModel(
         config,
         'answers',
         prompt,
         facts,
         (call) => store.recordLlmCall({ ...call, runId: run.runId }),
+        {
+          permit,
+          ledger,
+          policy: EGRESS_POLICY,
+          dataClass: disclosure.dataClass,
+          now,
+        },
         { runId: run.runId },
       );
       if (asked.state === 'answered') {
@@ -323,6 +434,7 @@ async function main(): Promise<void> {
         cache.put(cacheKey, asked.answer);
       } else {
         step = 'unavailable';
+      }
       }
     }
     cache.close();

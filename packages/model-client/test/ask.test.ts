@@ -10,11 +10,17 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { framePrompt } from '@ledar/contracts';
-import type { EvidenceFact } from '@ledar/contracts';
+import {
+  EgressRefused,
+  PermitLedger,
+  describeEgress,
+  framePrompt,
+  grantEgress,
+} from '@ledar/contracts';
+import type { EvidenceFact, PromptParts } from '@ledar/contracts';
 
-import { ModelUnreachable, TierUnknown, askModel } from '../src/index.js';
-import type { CallRecord, ModelConfig } from '../src/index.js';
+import { ModelUnreachable, TierUnknown, askModel, outboundOf } from '../src/index.js';
+import type { CallRecord, Egress, ModelConfig } from '../src/index.js';
 
 const OFFERED: EvidenceFact[] = [
   { id: 'rows_examined', label: 'how many rows', labelKey: 'fact.rows-examined', value: '49148' },
@@ -32,12 +38,46 @@ const CONFIG: ModelConfig = {
   priceBasis: 'a price list, read on a date',
 };
 
-const PROMPT = framePrompt({
+const PARTS: PromptParts = {
   instruction: 'Answer in the JSON shape.',
   untrusted: [
     { label: 'facts', egressClass: 'customer-system-metadata', content: 'rows_total: 49148' },
   ],
-});
+};
+
+const PROMPT = framePrompt(PARTS);
+
+const POLICY = 'consent=test/1 retention=none/1 redaction=fence/1';
+const NOW = '2026-08-28T12:00:00.000Z';
+
+/**
+ * A permit over the payload this suite actually sends.
+ *
+ * Built from `outboundOf` rather than by hand, which is the point of that
+ * function being exported: the bytes consented to and the bytes sent are one
+ * object, not two that agree today.
+ */
+function egressFor(
+  over: Partial<{ body: string; destination: string; config: ModelConfig }> = {},
+): Egress {
+  const config = over.config ?? CONFIG;
+  const outbound = outboundOf(config, config.tiers['answers']!, PROMPT);
+  const disclosure = describeEgress(PARTS, over.destination ?? outbound.destination);
+  return {
+    permit: grantEgress({
+      disclosure,
+      body: over.body ?? outbound.body,
+      policy: POLICY,
+      now: NOW,
+      ttlMs: 60_000,
+      id: `permit-${Math.random()}`,
+    }),
+    ledger: new PermitLedger(),
+    policy: POLICY,
+    dataClass: 'customer-system-metadata',
+    now: NOW,
+  };
+}
 
 /** A fetch that returns one canned response and remembers what it was sent. */
 function fakeFetch(response: {
@@ -49,6 +89,8 @@ function fakeFetch(response: {
   const seen: {
     url: string;
     body: Record<string, unknown>;
+    /** The bytes exactly as handed over, for the egress gate's byte identity. */
+    raw: string;
     headers: unknown;
     redirect: RequestInit['redirect'];
   }[] = [];
@@ -56,6 +98,7 @@ function fakeFetch(response: {
     seen.push({
       url: String(url),
       body: JSON.parse(String(init.body)),
+      raw: String(init.body),
       headers: init.headers,
       redirect: init.redirect,
     });
@@ -81,7 +124,7 @@ const answered = (content: unknown, usage = { prompt_tokens: 400, completion_tok
 async function ask(response: Parameters<typeof fakeFetch>[0]) {
   const calls: CallRecord[] = [];
   const { impl, seen } = fakeFetch(response);
-  const out = await askModel(CONFIG, 'answers', PROMPT, OFFERED, (c) => calls.push(c), {
+  const out = await askModel(CONFIG, 'answers', PROMPT, OFFERED, (c) => calls.push(c), egressFor(), {
     fetchImpl: impl,
   });
   return { out, calls, seen };
@@ -211,7 +254,9 @@ describe('faults that belong to the caller, not the weather', () => {
     // what happened, including a tier that should have been refused.
     await assert.rejects(
       () =>
-        askModel(CONFIG, 'decides', PROMPT, OFFERED, () => {}, {
+        // The tier is checked before the egress gate, so any permit reaches
+        // this throw. Passing a real one keeps the test about the tier.
+        askModel(CONFIG, 'decides', PROMPT, OFFERED, () => {}, egressFor(), {
           fetchImpl: fakeFetch(answered({ answerable: true, facts: ['column'], missing: [] })).impl,
         }),
       TierUnknown,
@@ -227,6 +272,7 @@ describe('faults that belong to the caller, not the weather', () => {
           PROMPT,
           OFFERED,
           () => {},
+          egressFor(),
           { fetchImpl: fakeFetch(answered({ answerable: true, facts: [], missing: [] })).impl },
         ),
       ModelUnreachable,
@@ -235,15 +281,166 @@ describe('faults that belong to the caller, not the weather', () => {
 
   it('allows plain http to localhost, which is where a fake endpoint lives', async () => {
     const calls: CallRecord[] = [];
+    const local = { ...CONFIG, baseUrl: 'http://127.0.0.1:8080/v1' };
     const out = await askModel(
-      { ...CONFIG, baseUrl: 'http://127.0.0.1:8080/v1' },
+      local,
       'answers',
       PROMPT,
       OFFERED,
       (c) => calls.push(c),
+      // A different baseUrl is a different destination, so it needs its own
+      // permit. That it does is the destination binding working.
+      egressFor({ config: local }),
       { fetchImpl: fakeFetch(answered({ answerable: true, facts: ['column'], missing: [] })).impl },
     );
     assert.equal(out.state, 'answered');
+  });
+});
+
+describe('the egress gate — _doc/27 Module 4', () => {
+  /**
+   * The red test, written as `_doc/27` states it:
+   *
+   * > *"Cấp permit rồi thay ĐÚNG MỘT định danh schema, hoặc đổi destination.
+   * > Nếu hàm network được gọi → module thất bại."*
+   *
+   * So every assertion here is about `seen.calls`, not about the return
+   * value. A gate that refuses AFTER the request has gone is not a gate, and
+   * a test that only checks the thrown error cannot tell the difference.
+   */
+  function watched() {
+    const { impl, seen } = fakeFetch(
+      answered({ answerable: true, facts: ['column'], missing: [] }),
+    );
+    return { impl, seen };
+  }
+
+  it('🟥 one changed identifier in the payload — nothing reaches the network', async () => {
+    const { impl, seen } = watched();
+    // A permit granted over a DIFFERENT payload: same shape, one table name
+    // apart. This is the shape ㉔ measured a model producing.
+    const elsewhere = outboundOf(CONFIG, CONFIG.tiers['answers']!, PROMPT).body.replace(
+      'rows_total',
+      'rows_totai',
+    );
+    await assert.rejects(
+      askModel(CONFIG, 'answers', PROMPT, OFFERED, () => {}, egressFor({ body: elsewhere }), {
+        fetchImpl: impl,
+      }),
+      EgressRefused,
+    );
+    assert.equal(seen.length, 0, 'the request went out despite a mismatched permit');
+  });
+
+  it('🟥 a different destination — nothing reaches the network', async () => {
+    const { impl, seen } = watched();
+    await assert.rejects(
+      askModel(
+        CONFIG,
+        'answers',
+        PROMPT,
+        OFFERED,
+        () => {},
+        egressFor({ destination: 'https://elsewhere.example/v1/chat/completions' }),
+        { fetchImpl: impl },
+      ),
+      EgressRefused,
+    );
+    assert.equal(seen.length, 0);
+  });
+
+  it('🟥 a permit already spent — nothing reaches the network', async () => {
+    // One grant is one send. Replaying would make a person's single "yes"
+    // cover every call after it.
+    const egress = egressFor();
+    const first = watched();
+    await askModel(CONFIG, 'answers', PROMPT, OFFERED, () => {}, egress, {
+      fetchImpl: first.impl,
+    });
+    assert.equal(first.seen.length, 1);
+
+    const second = watched();
+    await assert.rejects(
+      askModel(CONFIG, 'answers', PROMPT, OFFERED, () => {}, egress, {
+        fetchImpl: second.impl,
+      }),
+      EgressRefused,
+    );
+    assert.equal(second.seen.length, 0);
+  });
+
+  it('🟥 an expired permit — nothing reaches the network', async () => {
+    const { impl, seen } = watched();
+    await assert.rejects(
+      askModel(
+        CONFIG,
+        'answers',
+        PROMPT,
+        OFFERED,
+        () => {},
+        { ...egressFor(), now: '2026-08-28T13:00:00.000Z' },
+        { fetchImpl: impl },
+      ),
+      EgressRefused,
+    );
+    assert.equal(seen.length, 0);
+  });
+
+  it('🟥 a policy the permit was not granted under — nothing reaches the network', async () => {
+    const { impl, seen } = watched();
+    await assert.rejects(
+      askModel(
+        CONFIG,
+        'answers',
+        PROMPT,
+        OFFERED,
+        () => {},
+        { ...egressFor(), policy: 'consent=test/2 retention=forever/1' },
+        { fetchImpl: impl },
+      ),
+      EgressRefused,
+    );
+    assert.equal(seen.length, 0);
+  });
+
+  it('🟥 a refused call writes no cost row, because it cost nothing', async () => {
+    // `llm_call` measures spend. A call that never happened has none, and a
+    // zero-token row would have to be excluded from every sum afterwards.
+    const { impl } = watched();
+    const calls: CallRecord[] = [];
+    await assert.rejects(
+      askModel(
+        CONFIG,
+        'answers',
+        PROMPT,
+        OFFERED,
+        (c) => calls.push(c),
+        egressFor({ destination: 'https://elsewhere.example/v1/chat/completions' }),
+        { fetchImpl: impl },
+      ),
+      EgressRefused,
+    );
+    assert.deepEqual(calls, []);
+  });
+
+  it('the exact payload it was granted over does go', async () => {
+    const { impl, seen } = watched();
+    const out = await askModel(CONFIG, 'answers', PROMPT, OFFERED, () => {}, egressFor(), {
+      fetchImpl: impl,
+    });
+    assert.equal(out.state, 'answered');
+    assert.equal(seen.length, 1);
+  });
+
+  it('🟥 the bytes checked are the bytes sent', async () => {
+    // Not "a body equal to" — the SAME string. Building the payload twice,
+    // once to check and once to send, would make the guarantee "two pieces of
+    // code agree today".
+    const { impl, seen } = watched();
+    await askModel(CONFIG, 'answers', PROMPT, OFFERED, () => {}, egressFor(), {
+      fetchImpl: impl,
+    });
+    assert.equal(seen[0]?.raw, outboundOf(CONFIG, CONFIG.tiers['answers']!, PROMPT).body);
   });
 });
 
@@ -262,6 +459,7 @@ describe('what is recorded when nobody can price it', () => {
       PROMPT,
       OFFERED,
       (c) => calls.push(c),
+      egressFor({ config: unpriced }),
       { fetchImpl: fakeFetch(answered({ answerable: true, facts: ['column'], missing: [] })).impl },
     );
     assert.equal(calls[0]?.costMicros, null);

@@ -45,9 +45,13 @@
  */
 
 import {
+  checkEgress,
   sealAnswer,
+  type EgressClass,
+  type EgressPermit,
   type EvidenceFact,
   type ModelStepState,
+  type PermitLedger,
   type SealedAnswer,
   type SealedPrompt,
 } from '@ledar/contracts';
@@ -141,6 +145,55 @@ export type AskOptions = {
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 
+/**
+ * The exact bytes and the exact URL, built once.
+ *
+ * Exported because a permit is granted over these and checked against these,
+ * and if the caller had to guess at them the guarantee would be that two
+ * pieces of code agree today. `askModel` calls this and so does whoever asks
+ * a person for consent, so there is one description of what leaves.
+ *
+ * 🟥 Changing anything in here changes every hash. That is not a hazard to
+ * work around — it is the mechanism: a payload nobody agreed to cannot match
+ * a permit somebody granted.
+ */
+export function outboundOf(
+  config: ModelConfig,
+  tier: TierConfig,
+  prompt: SealedPrompt,
+): { body: string; destination: string } {
+  const base = config.baseUrl.replace(/\/+$/, '');
+  return {
+    destination: `${base}/chat/completions`,
+    body: JSON.stringify({
+      model: tier.model,
+      max_tokens: tier.maxTokens,
+      reasoning_effort: tier.effort,
+      response_format: { type: 'json_object' },
+      messages: [{ role: 'user', content: prompt.text }],
+    }),
+  };
+}
+
+/**
+ * Everything the egress gate needs, and it is REQUIRED.
+ *
+ * A required parameter rather than an option, so a call site that has not
+ * thought about consent does not compile. `_doc/27` puts the gate in this
+ * file for exactly this reason: at each caller it becomes the gate that
+ * exists and that the real path forgets to call — AGENTS §4.3.
+ */
+export type Egress = {
+  readonly permit: EgressPermit;
+  /** Holds which permits are spent. One per session. */
+  readonly ledger: PermitLedger;
+  /** Consent, retention and redaction versions, as the permit recorded them. */
+  readonly policy: string;
+  readonly dataClass: EgressClass;
+  /** ISO. Passed in rather than read from a clock, so expiry is testable. */
+  readonly now: string;
+};
+
 function costOf(
   config: ModelConfig,
   model: string,
@@ -176,6 +229,7 @@ export async function askModel(
   prompt: SealedPrompt,
   offered: readonly EvidenceFact[],
   record: (call: CallRecord) => void,
+  egress: Egress,
   options: AskOptions = {},
 ): Promise<Asked> {
   const tier = config.tiers[tierName];
@@ -199,6 +253,36 @@ export async function askModel(
     );
   }
 
+  // ---- the egress gate ----------------------------------------------------
+  //
+  // 🟥 Everything below this block is network. Everything above it is not, and
+  // that is why the check sits exactly here: after the payload is final and
+  // before a byte moves. `_doc/27` Module 4 — *"Permit lệch phải thất bại
+  // TRƯỚC network."*
+  //
+  // It THROWS rather than returning `unavailable`. A missing or mismatched
+  // permit is a fault in the caller, like an unknown tier or a plaintext
+  // endpoint above; the `unavailable` path is for weather. And it does not
+  // write a `CallRecord`: that table measures spend, and a call that never
+  // happened has no spend to report. Whoever wants an audit trail of refusals
+  // keeps one where refusals are the subject.
+  const outbound = outboundOf(config, tier, prompt);
+  checkEgress(
+    egress.permit,
+    {
+      body: outbound.body,
+      destination: outbound.destination,
+      dataClass: egress.dataClass,
+      policy: egress.policy,
+    },
+    egress.now,
+  );
+  // Spent here, not by the caller. A permit marked used by whoever remembered
+  // to is a permit that can be replayed by whoever did not — and it is spent
+  // BEFORE the request, so a call that fails mid-flight still burns it. One
+  // grant is one attempt; retrying is a new decision by a person.
+  egress.ledger.spend(egress.permit);
+
   const doFetch = options.fetchImpl ?? fetch;
   const started = Date.now();
 
@@ -210,7 +294,10 @@ export async function askModel(
   let why: string | null = null;
 
   try {
-    const res = await doFetch(`${base}/chat/completions`, {
+    // The URL and the body are the ones the permit was checked against, not
+    // rebuilt here. Building them twice would mean the thing checked and the
+    // thing sent are two objects that happen to agree.
+    const res = await doFetch(outbound.destination, {
       method: 'POST',
       headers: {
         authorization: `Bearer ${config.apiKey}`,
@@ -221,13 +308,7 @@ export async function askModel(
       // than a guarantee this file may lean on.
       redirect: 'manual',
       signal: AbortSignal.timeout(options.timeoutMs ?? DEFAULT_TIMEOUT_MS),
-      body: JSON.stringify({
-        model: tier.model,
-        max_tokens: tier.maxTokens,
-        reasoning_effort: tier.effort,
-        response_format: { type: 'json_object' },
-        messages: [{ role: 'user', content: prompt.text }],
-      }),
+      body: outbound.body,
     });
     status = res.status;
 
