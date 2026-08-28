@@ -47,12 +47,15 @@
 import {
   checkEgress,
   sealAnswer,
+  sealLookup,
   type EgressClass,
   type EgressPermit,
   type EvidenceFact,
   type ModelStepState,
+  type LookupOffer,
   type PermitLedger,
   type SealedAnswer,
+  type SealedLookup,
   type SealedPrompt,
 } from '@ledar/contracts';
 
@@ -97,6 +100,16 @@ export type ModelConfig = {
 /** What `askModel` reports back, in the vocabulary the report already speaks. */
 export type Asked =
   | { state: Extract<ModelStepState, 'answered'>; answer: SealedAnswer }
+  | { state: Extract<ModelStepState, 'unavailable'>; why: string };
+
+/** What `askLookup` reports back. Same two states, a different sealed thing. */
+export type Looked =
+  | { state: Extract<ModelStepState, 'answered'>; lookup: SealedLookup }
+  | { state: Extract<ModelStepState, 'unavailable'>; why: string };
+
+/** The shape the private transport hands back, before either wrapper names it. */
+type SealedCall<T> =
+  | { state: Extract<ModelStepState, 'answered'>; value: T }
   | { state: Extract<ModelStepState, 'unavailable'>; why: string };
 
 /**
@@ -213,7 +226,18 @@ function costOf(
 }
 
 /**
- * Asks one model one question, and records what it cost either way.
+ * One call, recorded either way, and sealed by whatever the caller must seal by.
+ *
+ * 🟥 NOT EXPORTED, and that is the whole reason it takes `seal` as an
+ * argument. The rule this package lives under is that it cannot hand back
+ * output nobody checked; a public function with a pluggable seal would let a
+ * caller pass something that checks nothing. Private, it is the opposite: the
+ * two exported wrappers below each supply a real seal, and there is no third
+ * way in.
+ *
+ * It exists because G3 needs a second kind of sealed answer — a CHOICE from a
+ * menu rather than a reply about facts — and the alternative was a second copy
+ * of the transport, the cost table and the six failure shapes ⑲ measured.
  *
  * Never throws for a provider fault. A model being down is a thing the report
  * says a sentence about (`model.unavailable`), not an exception that takes the
@@ -221,17 +245,18 @@ function costOf(
  * and D.5 exists because losing that to a timeout would be absurd.
  *
  * It DOES throw for a caller fault — an unknown tier, an endpoint that would
- * put the key on the wire in clear. Those are bugs here, not weather.
+ * put the key on the wire in clear, a permit that does not match. Those are
+ * bugs here, not weather.
  */
-export async function askModel(
+async function callAndSeal<T>(
   config: ModelConfig,
   tierName: string,
   prompt: SealedPrompt,
-  offered: readonly EvidenceFact[],
   record: (call: CallRecord) => void,
   egress: Egress,
+  seal: (parsed: unknown) => T,
   options: AskOptions = {},
-): Promise<Asked> {
+): Promise<SealedCall<T>> {
   const tier = config.tiers[tierName];
   if (!tier) {
     // The client validates the tier, not the store. `llm_call.tier` is free
@@ -373,9 +398,9 @@ export async function askModel(
     return { state: 'unavailable', why: note };
   }
 
-  let answer: SealedAnswer;
+  let value: T;
   try {
-    answer = sealAnswer(parsed, offered);
+    value = seal(parsed);
   } catch (err) {
     // A model that returns the wrong shape has failed the call. Salvaging part
     // of it is how a reader ends up with half an answer nobody checked — and
@@ -387,5 +412,63 @@ export async function askModel(
   }
 
   finishCall('ok', null);
-  return { state: 'answered', answer };
+  return { state: 'answered', value };
+}
+
+/**
+ * VS-8: asks about a finding, and returns an answer checked against the facts
+ * it was offered.
+ */
+export async function askModel(
+  config: ModelConfig,
+  tierName: string,
+  prompt: SealedPrompt,
+  offered: readonly EvidenceFact[],
+  record: (call: CallRecord) => void,
+  egress: Egress,
+  options: AskOptions = {},
+): Promise<Asked> {
+  const out = await callAndSeal(
+    config,
+    tierName,
+    prompt,
+    record,
+    egress,
+    (parsed) => sealAnswer(parsed, offered),
+    options,
+  );
+  return out.state === 'answered' ? { state: 'answered', answer: out.value } : out;
+}
+
+/**
+ * G3: asks WHERE to look, and returns a choice checked against the menu.
+ *
+ * The model writes no sentence and no SQL here; it picks ids. `sealLookup`
+ * refuses anything that was not offered, which is the only detectable form of
+ * the failure ㉔ measured — an answer that is fluent, true, and about somebody
+ * else's question.
+ *
+ * A separate function rather than a flag on `askModel`, because the two seal
+ * against different things and a caller must not be able to get the wrong one
+ * by passing the wrong argument.
+ */
+export async function askLookup(
+  config: ModelConfig,
+  tierName: string,
+  prompt: SealedPrompt,
+  offer: LookupOffer,
+  record: (call: CallRecord) => void,
+  egress: Egress,
+  options: AskOptions = {},
+): Promise<Looked> {
+  const out = await callAndSeal(
+    config,
+    tierName,
+    prompt,
+    record,
+    egress,
+    (parsed) => sealLookup(parsed, offer),
+    options,
+  );
+  return out.state === 'answered' ? { state: 'answered', lookup: out.value } : out;
 }

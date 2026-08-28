@@ -57,6 +57,7 @@ import { z } from 'zod';
 
 import { entitiesIn, pathsFrom, refOf } from './entity-graph.js';
 import type { EntityEdge, EntityGraph, EntityRef } from './entity-graph.js';
+import type { PromptParts } from './untrusted.js';
 
 /**
  * What a Postgres database structurally cannot answer.
@@ -344,4 +345,78 @@ export function resolveLookup(
   }
 
   return { subject, routes };
+}
+
+/**
+ * The prompt for a lookup: the menu, the question, and the shape to answer in.
+ *
+ * 🟥 It lives beside `sealLookup` rather than at a call site, and that is a
+ * correctness coupling rather than tidiness. The ids the model is SHOWN and
+ * the ids the seal ACCEPTS have to be the same set; built in two places they
+ * are two sets that agree until somebody changes one. Here they come off the
+ * same `LookupOffer`.
+ *
+ * ## What the model is not asked to do
+ *
+ * Write a sentence. Write SQL. Name a table. It answers with ids from the
+ * lists below and a closed vocabulary of what a database cannot know. ㉔ is
+ * the reason: the payload that landed most often there just asked for a
+ * different table, and the only way to catch that is to make naming a table
+ * impossible rather than checkable.
+ *
+ * ## Both blocks are the customer's
+ *
+ * The question is theirs. The menu is derived from THEIR schema — table names
+ * are exactly what `_doc/27` says the permit protects — so both are
+ * `customer-system-metadata` and both go inside the fence.
+ */
+export function lookupPromptParts(question: string, offer: LookupOffer): PromptParts {
+  const subjects = offer.subjects
+    .map((s) => `${s.id} = ${refOf(s.entity)}`)
+    .join('\n');
+
+  const paths = offer.paths
+    .map((p) => `${p.id} = from ${p.from} to ${p.to} (${p.path.length} hop${p.path.length === 1 ? '' : 's'})`)
+    .join('\n');
+
+  return {
+    instruction: [
+      'Choose where to look. Answer using ONLY this JSON shape, no prose, no extra keys.',
+      '',
+      '  {',
+      '    "answerable": boolean,',
+      '    "subject": string | null,',
+      '    "follow": string[],',
+      '    "outside": string[]',
+      '  }',
+      '',
+      '- `subject`: ONE id from the SUBJECTS list. Never a table name.',
+      '- `follow`: ids from the ROUTES list, and only ones starting with the',
+      '  subject id you chose. Each at most once.',
+      '- `outside`: what this question needs that a database does not hold.',
+      `  Only these values: ${OUTSIDE_KINDS.join(', ')}`,
+      '',
+      'Most real questions are part database and part something else. Naming',
+      'what is outside is expected, not a failure — say `answerable: true` and',
+      'list it. Use `answerable: false` only when the database cannot be aimed',
+      'at the question at all, and then name nothing to look at.',
+    ].join('\n'),
+    untrusted: [
+      {
+        label: 'the question',
+        egressClass: 'customer-system-metadata',
+        content: question,
+      },
+      {
+        label: 'SUBJECTS you may choose from',
+        egressClass: 'customer-system-metadata',
+        content: subjects,
+      },
+      {
+        label: 'ROUTES you may follow',
+        egressClass: 'customer-system-metadata',
+        content: paths,
+      },
+    ],
+  };
 }
