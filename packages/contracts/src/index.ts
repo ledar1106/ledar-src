@@ -20,3 +20,5 @@ export * from './project-profile.js';
 export * from './profile-observe.js';
 export * from './scan-plan.js';
 export * from './entity-graph.js';
+export * from './bounded-lookup.js';
+export * from './timeline.js';
