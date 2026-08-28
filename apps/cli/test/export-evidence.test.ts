@@ -303,6 +303,11 @@ const OBSERVATION: Finding = {
   columns: ['customer_id'],
   plainText: PROSE.plainText,
   technical: PROSE.technical,
+  // Since N50 a raised finding carries one too — and for this test that is
+  // one MORE piece of rule-written prose the export has to redact, which is
+  // the whole subject here. Same canary as the negative below: a leak that
+  // copies the field is caught whichever finding it copied it from.
+  boundary: PROSE.boundary,
   evidence: {
     sql: PROSE.observationSql,
     rowCount: 9,

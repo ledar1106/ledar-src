@@ -446,36 +446,61 @@ const FindingBase = z.object({
   /** The same thing said in the vocabulary of whoever has to fix it. */
   technical: saying('technical'),
 
+  /**
+   * The limit of the measurement that produced this — "but only this far".
+   *
+   * Required of EVERY finding as of 2026-08-27, debt N50. It used to live on
+   * the two kinds that assert nothing is wrong, on the reasoning that only a
+   * negative needs to state where it looked. That reasoning is half right and
+   * the half it misses is the expensive one:
+   *
+   *   a negative without a boundary   reads as "there is nothing to find"
+   *   a CLAIM without a boundary      reads as "and this is the whole of it"
+   *
+   * Both are the same mistake — a sentence taken for more than it measured —
+   * and the second one lands on the findings a person actually acts on. A
+   * count of orphaned rows in one constraint is not a statement about the
+   * table, and nothing in the old shape stopped it being read as one.
+   * `_doc/25` S6 asked for this on every finding from the beginning.
+   *
+   * ⚠️ It is `saying()` rather than a plain string for the reason every field
+   * here is: `.min(1)` would admit `"   "`, and a whitespace boundary is a
+   * missing boundary that passes validation. There is no such thing as a
+   * finding whose limits are not worth a sentence — a rule that cannot say
+   * what it did not cover has not finished thinking about what it did.
+   */
+  boundary: saying('boundary'),
+
   evidence: Evidence.nullable(),
   coverage: Coverage,
 });
 
 /**
  * Anything asserting that something is *not* wrong must state where it
- * looked.
+ * looked — and, since N50, anything asserting that something IS wrong has to
+ * say the same about itself.
  *
  * The compiler enforces this for findings it can see. `sealFindings` enforces
  * it for the rest — findings read back out of the store, or produced by
  * anything that was not compiled against this file.
+ *
+ * The members below now differ only by `kind`, which is the point rather than
+ * an accident waiting to be tidied into a single object: `kind` decides how
+ * much weight a sentence carries, and a discriminated union is what lets a
+ * reader of this file see the five weights at once. It is also what makes an
+ * exhaustive switch downstream a compile error rather than a silent default.
  */
 export const Finding = z.discriminatedUnion('kind', [
   FindingBase.extend({ kind: z.literal('observation') }),
   FindingBase.extend({ kind: z.literal('inference') }),
   FindingBase.extend({ kind: z.literal('recommendation') }),
-  FindingBase.extend({
-    kind: z.literal('negative'),
-    /** The sentence that makes "nothing found" honest. */
-    boundary: saying('boundary'),
-  }),
-  FindingBase.extend({
-    kind: z.literal('abstained'),
-    /**
-     * Here the boundary is not a caveat on the claim — it IS the claim.
-     * An abstention has nothing else to say: no rows were counted, no
-     * targets were reached, and the only content is which ones and why.
-     */
-    boundary: saying('boundary'),
-  }),
+  FindingBase.extend({ kind: z.literal('negative') }),
+  /**
+   * For an abstention the boundary is not a caveat on the claim — it IS the
+   * claim. Nothing was counted and no target was reached, so the only content
+   * there is to carry is which ones and why.
+   */
+  FindingBase.extend({ kind: z.literal('abstained') }),
 ]);
 export type Finding = z.infer<typeof Finding>;
 

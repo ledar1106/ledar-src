@@ -80,11 +80,12 @@ export type UserRuleEntry = {
   /** The identifiers and the counts. */
   why: string;
   /**
-   * The boundary, when this claim has one.
+   * The boundary — or null when the section has already said it.
    *
-   * Only `negative` and `abstained` carry one — the contract gives it to
-   * claims asserting that nothing is wrong, which are the ones that have to
-   * say where they looked.
+   * ⚠️ Null no longer means "this claim has no limits". Since N50 every
+   * finding carries a boundary, so null here is a RENDERING decision made
+   * below, not a fact about the claim. Read the reason there before removing
+   * this field or filling it in unconditionally.
    */
   boundary: string | null;
 };
@@ -113,11 +114,42 @@ export function buildUserRuleSection(
   return {
     heading: t(lang, 'head.you-asked'),
     preamble: t(lang, 'scan.you-asked-preamble'),
-    entries: mine.map((f) => ({
-      plain: f.plainText,
-      where: `${f.schema}.${f.table}`,
-      why: f.technical,
-      boundary: 'boundary' in f && typeof f.boundary === 'string' ? f.boundary : null,
-    })),
+    entries: entriesOf(mine),
   };
+}
+
+/**
+ * The entries, with a boundary every entry shares reduced to none of them.
+ *
+ * Debt N50 gave every finding a boundary, and applied naively here that would
+ * print ONE sentence once per rule in a section where every rule's boundary is
+ * the same sentence — "I checked the rule as it was read back to you; I did
+ * not check whether that is the rule you meant". It is true of all of them at
+ * once, which is why `scan.you-asked-preamble` already carries it above the
+ * list.
+ *
+ * VS-7 measured what per-finding repetition costs and the finding was not
+ * subtle: a sentence printed three times in sixty lines stops being read. So
+ * the rule here is about REPETITION, not about claim kind — suppress a
+ * boundary only when every entry in the section has the identical one, and
+ * show it the moment two rules differ. A rule with something of its own to
+ * disclose is exactly the case the old shape would have hidden.
+ *
+ * ⚠️ Nothing is lost by this. The boundary is on the finding, in the store,
+ * and in the evidence pack whatever this returns; this decides what is
+ * PRINTED, and only in this one section.
+ */
+function entriesOf(mine: readonly SealedFinding[]): UserRuleEntry[] {
+  const boundaries = mine.map((f) =>
+    'boundary' in f && typeof f.boundary === 'string' ? f.boundary : null,
+  );
+  const allSame =
+    boundaries.length > 1 && new Set(boundaries).size === 1 && boundaries[0] !== null;
+
+  return mine.map((f, i) => ({
+    plain: f.plainText,
+    where: `${f.schema}.${f.table}`,
+    why: f.technical,
+    boundary: allSame ? null : (boundaries[i] ?? null),
+  }));
 }

@@ -456,6 +456,18 @@ export async function runLayerA(
           // separate decision from moving where it is written.
           parent: String(fk.referencedTable),
         }),
+      // What the number is, and what it is NOT about. Debt N50: a count with
+      // no boundary reads as "and this is the whole of it", which is the same
+      // mistake as a negative with no boundary, pointed the other way.
+      boundary: T('layer-a.bound.fk-orphans', {
+        table: fk.table,
+        parent: String(fk.referencedTable),
+        // Empty when nothing was cut. The ceiling clause is a separate entry
+        // rather than a ternary over two whole sentences: a translator who has
+        // to keep two long strings in step will one day fail to, and the half
+        // that drifts is the half nobody reads twice.
+        ceiling: capped ? T('layer-a.bound.ceiling', { limit: COUNT_LIMIT }) : '',
+      }),
       technical:
         T('layer-a.fk.technical', {
           name: fk.name,
@@ -529,6 +541,10 @@ export async function runLayerA(
             count: bad,
             table: c.table,
           }),
+        boundary: T('layer-a.bound.check-violations', {
+          table: c.table,
+          ceiling: capped ? T('layer-a.bound.ceiling', { limit: COUNT_LIMIT }) : '',
+        }),
         technical:
           T('layer-a.check.technical', {
             name: c.name,
@@ -650,6 +666,11 @@ export async function runLayerA(
       plainText: idx.isUnique
         ? T('layer-a.index.unique.plain', { table: idx.table })
         : T('layer-a.index.plain', { table: idx.table }),
+      // No ceiling clause here because no rows were read at all. This rule
+      // asks the catalog what state an index is in; it never asks the table
+      // what happened while the index was in that state, and the boundary has
+      // to say so rather than let the silence be read as "nothing happened".
+      boundary: T('layer-a.bound.index-state', { table: idx.table }),
       technical: T('layer-a.index.technical', {
         name: idx.name,
         table: `${idx.schema}.${idx.table}`,

@@ -99,12 +99,19 @@ export class ClaimRefused extends Error {
  */
 const WHY: Record<string, string> = {
   boundary:
-    'A negative claim states that something was not found. Without a\n' +
-    'boundary it reads as "there is nothing to find", which is a much\n' +
-    'larger statement than the one that was measured.\n\n' +
+    'Every finding states the limit of the measurement behind it. Two\n' +
+    'ways to get this wrong, and they are the same mistake pointed in\n' +
+    'opposite directions:\n\n' +
+    '  a negative with no boundary reads as "there is nothing to find"\n' +
+    '  a count with no boundary reads as "and this is the whole of it"\n\n' +
+    'Both take a sentence for more than it measured, and the second one\n' +
+    'lands on the findings somebody acts on.\n\n' +
     'Add `boundary`: one sentence naming what was examined and what was\n' +
     'not — "checked 12 of 14 constraints in public; 2 were skipped, and\n' +
-    'nothing here covers rules that were never declared."',
+    'nothing here covers rules that were never declared."\n\n' +
+    'It is not a disclaimer and it is not decoration. If the rule cannot\n' +
+    'say what it did not cover, it has not finished working out what it\n' +
+    'did.',
 
   kind:
     '`kind` decides how much weight a sentence carries and which extra\n' +

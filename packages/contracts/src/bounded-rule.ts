@@ -366,9 +366,19 @@ function listOf(parts: readonly string[], lang: Lang): string {
   if (parts.length <= 1) return parts[0] ?? '';
   const head = parts.slice(0, -1);
   const last = parts[parts.length - 1]!;
-  if (lang === 'vi') return `${head.join(', ')} và ${last}`;
   return head.length === 1 ? `${head[0]} and ${last}` : `${head.join(', ')}, and ${last}`;
 }
+// ⚠️ `lang` is still the parameter and is deliberately still unused here.
+//
+// List grammar is one of two places per-language rules live OUTSIDE the message
+// catalogue — the other is `num` in `i18n.ts` — and that was always the
+// exception to the rule this product's i18n is built on: a function per message
+// so each language solves its own grammar. A Vietnamese branch stood here until
+// 2026-08-27 (`${head} và ${last}`); it went with `vi.ts`.
+//
+// Keeping the parameter rather than deleting it is the seam: the day a second
+// language returns, the compiler points at every signature that has to think
+// about it, and this is one of them.
 
 /**
  * What the product says it is about to check, for the user to confirm.

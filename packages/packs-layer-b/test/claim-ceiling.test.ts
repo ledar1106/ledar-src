@@ -102,6 +102,13 @@ function draft(over: Partial<FindingDraft> = {}): FindingDraft {
       'public.damaged_invoice.customer_id (20 distinct values over 25 sampled ' +
       'non-null rows) matches public.customer.customer_id at 80.0%, with 5 ' +
       'unmatched (20.0%). No foreign key is declared between them.',
+    // N50. Worth being a real sentence rather than a placeholder here: this
+    // file is about what a Layer B claim may and may not SAY, and the boundary
+    // is now one of the strings the prose gate reads.
+    boundary:
+      'Counted every row of that column, so the number is exact — but the ' +
+      'database was never told the two tables are connected, so what it means ' +
+      'is a guess.',
 
     evidence: {
       sql: 'SELECT count(*) FROM public.damaged_invoice c LEFT JOIN public.customer p ON p.customer_id = c.customer_id',

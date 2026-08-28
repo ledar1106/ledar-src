@@ -33,6 +33,9 @@ function goodObservation(over: Record<string, unknown> = {}): FindingDraft {
     id: 'test/observation',
     rule: 'test/rule',
     kind: 'observation',
+    // N50: every kind carries a boundary now, so a fixture without one is no
+    // longer a good observation — it is the case `sealFindings` must refuse.
+    boundary: 'Counted one column in one table; nothing else was examined.',
     confidence: 'certain',
     severity: 'low',
 

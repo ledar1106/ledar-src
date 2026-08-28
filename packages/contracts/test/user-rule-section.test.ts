@@ -35,6 +35,9 @@ function draft(over: Partial<FindingDraft> = {}): FindingDraft {
     columns: ['email'],
     plainText: '12 of the 900 rows in public.users do not match the rule you described.',
     technical: 'is-never-repeated on public.users.email: 12 of 900 rows',
+    // N50: on every kind now, including this observation. The section's own
+    // rule about REPEATING it is what the tests below measure.
+    boundary: 'I checked the rule exactly as it was read back to you.',
     evidence: { sql: 'SELECT 1', rowCount: 12, sampleSize: null, durationMs: 1, sample: [] },
     // `coverageOf`, not a literal: the four fields debt N1 added are
     // nullable on purpose, and writing them out here by hand is how a test
@@ -111,21 +114,59 @@ describe('the section that only exists when somebody asked for it', () => {
     }
   });
 
-  it('carries a boundary only for the claims the contract gives one to', () => {
-    // `negative` and `abstained` assert that nothing is wrong and must say
-    // where they looked. An observation asserts the opposite and has none.
-    const negative = sealFindings(
+  it('🟥 drops a boundary every entry shares, and keeps one that differs', () => {
+    // The rule this replaces was "a boundary only for the kinds the contract
+    // gives one to", and N50 gave one to all five — so that rule now means
+    // "print it on every entry", which is the repetition VS-7 measured as
+    // fatal: every user rule carries the SAME sentence, and the preamble above
+    // already says it once.
+    //
+    // The rule is about repetition rather than about claim kind, and the
+    // difference is the case below: a rule with a limit of its OWN to disclose
+    // is exactly what the old shape would have hidden, because it hid by kind.
+    const shared = sealFindings(
+      [draft(), draft({ id: 'user/x/y', table: 'posts' })],
+      'test',
+    );
+    for (const e of buildUserRuleSection(shared, 'en')!.entries) {
+      assert.equal(
+        e.boundary,
+        null,
+        'both rules carry the identical boundary, and the preamble already ' +
+          'states it — printing it twice more is the repetition VS-7 measured',
+      );
+    }
+
+    const differing = sealFindings(
       [
+        draft(),
         draft({
-          kind: 'negative',
-          plainText: 'All 900 rows in public.users match the rule you described.',
-          boundary: 'I checked the rule exactly as it was read back to you.',
-          evidence: null,
+          id: 'user/x/y',
+          table: 'posts',
+          boundary:
+            'I could only read 40 of the 900 rows in public.posts; the rest ' +
+            'are not visible to this account.',
         }),
       ],
       'test',
     );
-    assert.ok(buildUserRuleSection(negative, 'en')!.entries[0]!.boundary);
-    assert.equal(buildUserRuleSection(sealFindings([draft()], 'test'), 'en')!.entries[0]!.boundary, null);
+    const entries = buildUserRuleSection(differing, 'en')!.entries;
+    assert.ok(
+      entries.every((e) => e.boundary !== null),
+      'one rule had something of its own to disclose and the section swallowed ' +
+        'it — suppression is for a sentence they SHARE, never for a kind',
+    );
+    assert.notEqual(entries[0]!.boundary, entries[1]!.boundary);
+  });
+
+  it('a lone entry keeps its boundary — there is nothing for it to repeat', () => {
+    // The edge the suppression rule has to get right. One entry cannot repeat
+    // anything, so "they all share it" is not a reason to drop it, and the
+    // preamble is not a substitute for a sentence about the only rule shown.
+    const one = sealFindings([draft()], 'test');
+    assert.ok(
+      buildUserRuleSection(one, 'en')!.entries[0]!.boundary,
+      'the only entry in the section lost the limit of its own measurement',
+    );
   });
 });

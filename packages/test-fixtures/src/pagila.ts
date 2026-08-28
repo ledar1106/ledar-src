@@ -101,6 +101,29 @@ const FIXTURE_TABLES_SQL = `
   WHERE n.nspname = $1 AND c.relname = ANY($2::text[])
 `;
 
+/**
+ * The mark that says this fixture is the one CI builds, not merely a Pagila.
+ *
+ * Debt N47. Until 2026-08-27 the local container ran `postgres:18-alpine`
+ * while the workflow built the same fixture on `pgvector/pgvector:pg18`. Two
+ * servers, one name — so every type this extension owns was invisible to
+ * every local run, and a test asserting their ABSENCE passed here and failed
+ * there. It reached the public repository before anything caught it.
+ *
+ * The image also decides more than types: without the extension the schema
+ * load stops at `film_embedding.embedding public.vector(20)`, so a bench
+ * without it is a bench with a whole base table missing. That had been true
+ * here for weeks and nobody had a reason to look.
+ *
+ * Checked here rather than asserted in some suite because this is not a claim
+ * about a product — it is the question "am I standing on the agreed bench",
+ * and the answer has to be known BEFORE any measurement is believed. A wrong
+ * bench turns into a SKIP that names itself, and `skipped > 0` is already the
+ * one thing this project refuses to read as green.
+ */
+const FIXTURE_EXTENSION = 'vector';
+const FIXTURE_EXTENSION_SQL = `SELECT count(*)::int AS n FROM pg_extension WHERE extname = $1`;
+
 export type PagilaGate =
   | { readonly ok: true; readonly client: Client }
   | { readonly ok: false; readonly reason: string };
@@ -143,6 +166,27 @@ export async function openPagila(): Promise<PagilaGate> {
           `${FIXTURE_TABLES.length} fixture tables are missing ` +
           `(${missing.join(', ')}). Load them: ` +
           `psql -f packages/packs-layer-a/test/fixture-damage.sql`,
+      };
+    }
+
+    // Asked after the damage and not before it: a container with no fixture at
+    // all should be told that first, because it is the likelier mistake and
+    // the cheaper sentence to act on.
+    const ext = await client.query(FIXTURE_EXTENSION_SQL, [FIXTURE_EXTENSION]);
+    if (Number(ext.rows[0]?.n ?? 0) === 0) {
+      await client.end();
+      return {
+        ok: false,
+        reason:
+          `connected to ${redactDsn(PAGILA_DSN)}, and the damage is there, but the ` +
+          `'${FIXTURE_EXTENSION}' extension is not — so this is NOT the server CI ` +
+          `builds on. Anything measured about column types here would be measured ` +
+          `on a smaller world than the one that decides whether a change ships. ` +
+          `Rebuild on the image CI uses: docker rm -fv ledar-pagila && docker run -d ` +
+          `--name ledar-pagila --restart=no -e POSTGRES_PASSWORD=pagila_local_only ` +
+          `-e POSTGRES_DB=pagila -p 55432:5432 pgvector/pgvector:pg18, then ` +
+          `PSQL="docker exec -i ledar-pagila psql -U postgres -d pagila" bash ` +
+          `packages/test-fixtures/load-pagila.sh`,
       };
     }
   } catch (err) {

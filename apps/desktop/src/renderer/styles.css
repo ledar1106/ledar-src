@@ -354,6 +354,25 @@ svg { display: block; }
 
 .code-block.wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
 
+/*
+ * "Stopped early: … checks were not run." — the budget's disclosure, N51.
+ *
+ * Full-strength text on the attention tone, deliberately NOT `.meta`. The same
+ * argument `.banner-gap` makes applies here and applies harder: a grey aside
+ * saying part of the scan never ran is how a reader concludes the scan ran.
+ * It is not styled as a finding either — no card, no rail — because it says
+ * nothing about the database, only about how far we got looking at it.
+ */
+.cut-short {
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--attention);
+  background: var(--attention-soft);
+  color: var(--text);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
 .run-notes { display: grid; gap: 6px; padding: 16px 0; }
 
 /* ---- the four verdict shapes -------------------------------------------- */
@@ -417,6 +436,112 @@ svg { display: block; }
 .verdict-banner > div { display: grid; gap: 6px; }
 .verdict-headline { margin: 0; font-size: 17px; font-weight: 720; }
 .banner-gap { margin: 0; color: var(--text); font-size: 14px; overflow-wrap: anywhere; }
+
+/* ---- the map: five rungs, and no two alike ------------------------------ */
+
+/*
+ * 🟥 `_doc/25` 3.3 ① — meaning never lives in colour alone. Each rung differs
+ * in border STYLE, in rail WEIGHT, and in background as well as in colour, so
+ * the five still separate with colour removed. The label on every card says
+ * which rung it is in words, and `profile-shape.ts` holds the rule about what
+ * each one is allowed to be.
+ *
+ *   unknown    1px DASHED, no rail, plain    nobody said, nothing seen
+ *   stated     1px solid, 3px DOTTED rail    their claim, nothing behind it
+ *   suspected  1px DASHED, 3px solid rail    a question, never news
+ *   observed   1px solid, 3px solid rail     seen, and it can say where
+ *   verified   ink border, 8px rail, tick    seen and signed by a person
+ *
+ * The shape vocabulary is borrowed on purpose rather than invented: dashed +
+ * accent is what an unconfirmed pattern already wears in the report, and one
+ * product drawing the same uncertainty two ways teaches a reader that the
+ * drawing means nothing.
+ */
+.map { display: grid; gap: 4px; }
+
+.rung { gap: 10px; }
+.rung-head { display: flex; align-items: center; gap: 8px; }
+.rung-icon { width: 16px; height: 16px; flex: 0 0 auto; }
+.rung .kicker { color: var(--text); }
+
+/* Not a failure, and not drawn as one: the plainest card in the set. */
+.rung.unknown { border-style: dashed; }
+.rung.unknown .rung-head, .rung.unknown .kicker { color: var(--text-muted); }
+.rung.unknown .rung-icon { color: var(--text-muted); }
+
+.rung.stated { border-left: 3px dotted var(--pending); background: var(--pending-soft); }
+.rung.suspected {
+  border-style: dashed;
+  border-left: 3px solid var(--accent);
+  background: var(--accent-soft);
+}
+.rung.observed { border-left: 3px solid var(--surface-ink); }
+.rung.verified {
+  border: 1px solid var(--surface-ink);
+  border-left: 8px solid var(--surface-ink);
+  background: var(--surface-soft);
+}
+.rung.verified .rung-icon { color: var(--surface-ink); }
+
+/* A card the keyboard is sent back to after its own button is rebuilt. It is
+   focusable only for that instant, so it must not look like a control. */
+.rung:focus { outline: 3px solid var(--focus); outline-offset: 3px; }
+
+/* Where it was seen, and why. `where` is a place a person can go and check;
+   both are the backend's words and both wrap rather than push the card wide. */
+.evidence-block { display: grid; gap: 6px; }
+.evidence { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.evidence li {
+  display: grid;
+  gap: 2px;
+  padding-left: 12px;
+  border-left: 2px solid var(--border-strong);
+}
+.evidence .where { font-size: 13px; overflow-wrap: anywhere; }
+.evidence .why { color: #3d474f; font-size: 13px; overflow-wrap: anywhere; }
+
+/*
+ * 🟥 The two directions of a disagreement, which mean opposite things.
+ *
+ * `found` — they said no and it is there — is the loudest thing on the map,
+ * and gets the heavy solid edge and the glyph that stops a skim.
+ *
+ * `unseen` — they said yes and nothing here showed it — is about the edge of
+ * OUR sight, and wears the vocabulary this product uses for a hole in its own
+ * coverage: dashed, slate, and the absence mark. It may never carry the shape
+ * that means *something was found in your system*, because the thing that is
+ * missing is our view of it and not the thing itself.
+ */
+.conflict { gap: 12px; }
+.conflict.found { border: 2px solid var(--attention); background: var(--attention-soft); }
+.conflict.unseen { border: 1px dashed var(--pending); background: var(--pending-soft); }
+/* Stated per tone. Nothing falls through to the default, because the default
+   is green — the same trap `verdict-shape.ts` was written about. */
+.conflict.found .proof-icon { border-color: var(--attention); color: var(--attention); }
+.conflict.unseen .proof-icon { border-color: var(--pending); color: var(--pending); }
+
+/*
+ * Disclose and Admit, at the foot of the map. Full-strength text, not `.meta`.
+ *
+ * The same argument `.cut-short` makes: a grey aside saying the map was built
+ * from names and never from data is how a reader concludes it was built by
+ * reading their data — and the other line here is the product saying it has
+ * nowhere to record a disagreement, which is the last sentence that should be
+ * shrunk to fit.
+ */
+.admit {
+  margin: 0;
+  max-width: 68ch;
+  padding-left: 12px;
+  border-left: 2px solid var(--border-strong);
+  color: var(--text);
+  font-size: 14px;
+}
+
+/* The follow-up list after a "yes". A row is the whole hit area, so the box
+   and its label are one target rather than two adjacent ones. */
+.option-row { display: flex; align-items: center; gap: 10px; min-height: 32px; }
+.option-row input { width: 17px; height: 17px; flex: 0 0 auto; accent-color: var(--surface-ink); }
 
 details { margin: 0; }
 details summary { width: fit-content; color: var(--accent); font-weight: 650; }

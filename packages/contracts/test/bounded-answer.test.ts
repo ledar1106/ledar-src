@@ -163,48 +163,31 @@ describe('the sentence the reader actually sees', () => {
     assert.doesNotMatch(said, /rows_examined/);
   });
 
-  it('carries no English into a Vietnamese sentence', () => {
-    // 🟥 Found 2026-08-25 by asking a real question in Vietnamese, and the
-    // answer came back: "dựa trên: how many rows the finding rests on và
-    // whether every row was counted". English labels interpolated into a
-    // Vietnamese sentence — the exact failure `i18n.ts` says is worse than an
-    // untranslated report, arriving through a field nobody had thought of as
-    // prose.
-    //
-    // `EvidenceFact` now carries TWO names: `label` for the model, which reads
-    // it inside an English-instructed fence, and `labelKey` for the reader.
-    // Two audiences, two strings.
-    const ENGLISH_ONLY = [' the ', ' how ', ' rows ', ' column ', ' counted '];
-    const sealed = sealAnswer(
-      { answerable: true, facts: ['rows_examined', 'sampling', 'column'], missing: [] },
-      OFFERED,
-    );
-    const vi = ` ${renderAnswer(sealed, OFFERED, 'vi').toLowerCase()} `;
-    for (const word of ENGLISH_ONLY) {
-      assert.ok(!vi.includes(word), `the Vietnamese answer contains "${word.trim()}"`);
-    }
-  });
-
-  it('joins a list the way each language joins one', () => {
-    // A shared `join(', ')` would be English grammar imposed on every market —
-    // the same mistake as a shared template string.
-    const sealed = sealAnswer(
-      { answerable: false, facts: [], missing: ['who', 'when', 'why'] },
-      OFFERED,
-    );
-    assert.match(renderAnswer(sealed, OFFERED, 'en'), /, and /);
-    assert.match(renderAnswer(sealed, OFFERED, 'vi'), / và /);
-    assert.doesNotMatch(renderAnswer(sealed, OFFERED, 'vi'), /, and /);
-  });
-
-  it('reads differently in each language', () => {
-    const sealed = sealAnswer(
-      { answerable: false, facts: [], missing: ['when'] },
-      OFFERED,
-    );
-    const said = LANGS.map((lang) => renderAnswer(sealed, OFFERED, lang));
-    assert.equal(new Set(said).size, LANGS.length);
-  });
+  // 🟥 THREE TESTS STOOD HERE UNTIL 2026-08-27, and they are gone with `vi.ts`
+  // rather than adapted, because each of them needed two languages to say
+  // anything. Named here rather than deleted silently: what they were watching
+  // is still true of this code, and nothing watches it now.
+  //
+  //   'carries no English into a Vietnamese sentence'
+  //       The strongest of the three, and it caught a real fault: asking a
+  //       question in Vietnamese came back as "dựa trên: how many rows the
+  //       finding rests on và whether every row was counted" — English labels
+  //       interpolated into a translated sentence, through a field nobody had
+  //       thought of as prose. The fix is still in the code: `EvidenceFact`
+  //       carries TWO names, `label` for the model inside an English-instructed
+  //       fence and `labelKey` for the reader. A second language returning
+  //       without this test returning would put that fault back in reach.
+  //
+  //   'joins a list the way each language joins one'
+  //   'reads differently in each language'
+  //       Both compared one language's output against another's. With one
+  //       language there is nothing to compare, and an assertion that a set of
+  //       size one has size one is worse than no assertion: it is green for a
+  //       reason that has nothing to do with the subject (§4.3).
+  //
+  // Restoring a language means restoring these. `renderAnswer` still takes a
+  // `Lang`, and `listOf` in the source still carries a note saying its grammar
+  // branch was removed rather than never written.
 
   it('has a sentence for every gap kind, in every language', () => {
     // The gate that stops `MissingKind` growing a value with no sentence
@@ -235,6 +218,8 @@ describe('turning a finding into facts a model may cite', () => {
     table: 'votes',
     columns: ['post_id'],
     plainText: '6,459 of 49,148 rows point at a post that does not exist.',
+    // N50: every finding states the limit of the measurement behind it.
+    boundary: 'Counted every row of that one column; nothing else was examined.',
     evidence: { rowCount: 49148, sampleSize: null },
     coverage: { checked: 13, eligible: 13 },
   };

@@ -23,7 +23,12 @@
  */
 
 import type {
+  AreaFacts,
+  AreaReply,
   ConnectOutcome,
+  InterviewQuestion,
+  ProfileArea,
+  ProfileFacts,
   ReportFinding,
   ReportVerdict,
   ScanOutcome,
@@ -32,17 +37,17 @@ import type {
   WriteProbeFacts,
 } from '../shared/ipc.js';
 import { dsnDisplayTarget } from './dsn.js';
-import { t } from './i18n.js';
+import { isMessageKey, t } from './i18n.js';
 import {
-  INTERVIEW_QUESTIONS,
-  answerDontKnow,
-  answerTyped,
+  answer,
   currentQuestion,
   isFinished,
-  ruleSentence,
+  repliesOf,
+  skipRest,
   startInterview,
 } from './interview.js';
 import type { AnswerResult, Interview } from './interview.js';
+import { EVERY_RUNG, shapeForDirection, shapeForRung } from './profile-shape.js';
 import { shapeFor } from './verdict-shape.js';
 import type { VerdictShape } from './verdict-shape.js';
 
@@ -342,7 +347,18 @@ async function runScan(): Promise<void> {
   // is a run whose result is "the harness timed out", and that is the same
   // silence a hang produces — §4.16, an assertion that cannot come back red
   // is worth less than no assertion.
-  if (devMode) reportScanToSmoke(outcome);
+  //
+  // Held when the interview is still fetching its question set: the set became
+  // a round trip when it moved into the contract, and a line printed in that
+  // window reports `interview=loading of=?` — true, and evidence of nothing.
+  // The whole point of this slice is that five questions reach a person, so
+  // the line waits until the first one is on screen. `pendingScanSmoke` is
+  // released by `askQuestion`, and by the failure paths below, so a form that
+  // never arrives still prints rather than hanging silently.
+  if (devMode) {
+    if (interviewRequested && interview === null) pendingScanSmoke = outcome;
+    else reportScanToSmoke(outcome);
+  }
 }
 
 function renderBridgeFailure(err: unknown): void {
@@ -509,6 +525,25 @@ function renderReport(bubble: HTMLElement, outcome: Extract<ScanOutcome, { kind:
     report.append(reportSection(t('report.patterns'), body));
   }
 
+  // ④b What the scan did NOT run, in the budget's own sentence. Debt N51.
+  //
+  // Placed here and not in the run notes at the foot, because the CLI places
+  // it here — after the patterns, before the conclusion — and two surfaces of
+  // one product putting the same sentence in different places is how a reader
+  // who uses both stops trusting either. Down in `run-notes` beside the cost
+  // line it would read as bookkeeping; it is not bookkeeping. `QueryBudget`
+  // exists to enforce one rule, *never cut quietly*, and this sentence is the
+  // whole of how that rule reaches a person.
+  //
+  // Absent when nothing was cut, and that absence is honest: the sentence only
+  // exists when there is a refusal to report. Unlike `boundary`, nothing reads
+  // a meaning out of it not being here.
+  if (outcome.disclosure !== null) {
+    const cut = el('p', 'cut-short');
+    cut.textContent = outcome.disclosure;
+    report.append(cut);
+  }
+
   // ⑤ The verdict.
   const verdictBody = el('div', 'section-body');
   verdictBody.append(verdictCard(outcome.verdict, shape));
@@ -560,21 +595,26 @@ function scopeStrip(strip: string): HTMLElement {
 /**
  * One finding.
  *
- * ⚠️ Section ② findings get no attention rail, and that is a limit of the
- * contract rather than a choice. `ReportFinding` says which SECTION a finding
- * belongs to and nothing about whether it was RAISED — a negative ("the one
- * constraint I could check is being kept") and a real finding arrive in the
- * same shape. Painting every confirmed line as attention would put an amber
- * rail beside a sentence saying nothing was wrong, which is a louder lie than
- * a plain card beside one saying something was. The count of what was raised
- * is the verdict's job, and the verdict has the number.
+ * ⚠️ Section ② findings get no attention rail. That USED to be a limit of the
+ * contract; it is now a choice, and the difference is worth keeping straight.
  *
- * `boundary` is non-null on exactly the negatives and abstentions today, so it
- * would ALMOST serve as that flag. It is not used as one. The field is a
- * sentence about limits, not a claim kind, and `_doc/25` S6 asks for one on
- * every finding — the day that arrives, a rail keyed to it would invert
- * silently. That is the FE-2a mistake with a different subject: deriving a
- * category from something that merely correlates with it.
+ * The old note here said `ReportFinding` carried nothing about whether a
+ * finding was RAISED — a negative ("the one constraint I could check is being
+ * kept") and a real finding arrived in the same shape — and that `boundary`
+ * being non-null would ALMOST serve as the flag, so it deliberately went
+ * unused: *"the field is a sentence about limits, not a claim kind … a rail
+ * keyed to it would invert silently."* That reasoning was right and the debt
+ * it named is closed: `kind` is on the contract now (N49), taken from the
+ * contract's own `ClaimKind`, so the flag exists and is the real thing rather
+ * than a correlate.
+ *
+ * The rail still does not go on, and now for a reason about readers instead of
+ * a reason about types: painting every confirmed line as attention would put
+ * an amber rail beside a sentence saying nothing was wrong, which is a louder
+ * lie than a plain card beside one saying something was. The count of what was
+ * raised is the verdict's job, and the verdict has the number. If that is ever
+ * revisited, it is a `_doc/25` 3.3 question — and `kind` is what any answer
+ * would key off.
  *
  * Section ④ is different: every finding in it is unconfirmed by definition of
  * the section, so the question shape is backed by the data itself.
@@ -586,11 +626,27 @@ function findingCard(finding: ReportFinding): HTMLElement {
   copy.textContent = finding.plainText;
   card.append(copy);
 
-  if (finding.boundary !== null && finding.boundary !== '') {
+  {
+    // Unconditional as of N50, and that is the whole change: `_doc/25` S6 asks
+    // for this on every finding, and the guard that used to be here — render
+    // it if it is not null — was the shape that let some cards have one and
+    // others not. Once that is true of a card, its ABSENCE starts saying
+    // something nobody wrote, which is the argument the CLI makes for printing
+    // its coverage figures on every report.
+    //
     // "but only this far" — S6 says this belongs to the body of the card and
     // is never cut. Printed as the backend wrote it, prefix included: the
     // wording of that clause is the backend's to choose, and a second prefix
     // added here would read as the product stammering.
+    //
+    // 🟥 "Prefix included" was written here while it was FALSE. `scan-flow`
+    // handed over the bare sentence, so a negative and an abstention reached
+    // this card looking identical — and telling those apart is the entire
+    // reason debt N8 split the claim kinds in the first place. The lead-in is
+    // chosen on the backend now, by `kind`, in the same two catalogue entries
+    // the CLI uses. A comment describing an intention rather than the code is
+    // worse than no comment: it is the thing that stops the next reader from
+    // checking.
     const bound = el('p', 'boundary');
     bound.textContent = finding.boundary;
     card.append(bound);
@@ -659,27 +715,62 @@ function verdictCard(verdict: ReportVerdict, shape: VerdictShape): HTMLElement {
   return card;
 }
 
-// ---- S3: the one question a scan cannot answer -----------------------------
+// ---- S3: the five questions that build the map -----------------------------
 
 /**
  * The interview is a conversation state like every other one here: the
- * assistant asks in a turn, the person answers in the composer, and the
- * answer becomes their turn. There is no question screen and no step counter
- * chrome — with one question there is no count worth showing, and the block
- * above says why it now comes after the report rather than before the scan.
+ * assistant asks in a turn, the person answers by pressing a button, and the
+ * answer becomes their turn.
+ *
+ * 🟥 There is no text box in this screen any more, and that is the change.
+ * Until 2026-08-27 this asked one free-text question, with a model waiting
+ * downstream to turn the sentence into a runnable check. `interview.ts` holds
+ * the full account of what reading VS-6 that way cost. What matters at this
+ * layer: with no free text there is nothing to inject into, and the answers
+ * are three enum values plus a set of ids that came from the contract to
+ * begin with.
  */
 let interview: Interview | null = null;
 
 /**
- * The "I don't know" button of the question currently being asked.
+ * Set the moment the interview is asked for, before the form has arrived.
+ *
+ * 🟥 Without this the smoke line reported `interview=none of=0` on a run where
+ * the interview was starting — and `of=0` reads as "the question set is
+ * empty", which is a different and false statement. The set became a round
+ * trip when it moved into the contract, so there is now a window in which the
+ * window has asked and has nothing yet, and that window needs its own word
+ * rather than being folded into "never started".
+ */
+let interviewRequested = false;
+
+/** A scan smoke line held until the interview has asked its first question. */
+let pendingScanSmoke: ScanOutcome | null = null;
+
+/** Prints a held smoke line, once, whatever became of the interview. */
+function releaseScanSmoke(): void {
+  // Held while anything the line reports on is still in the air. The map is a
+  // round trip of its own, and a line printed between the last question being
+  // answered and the map coming back would say `profile=none` about a run
+  // that was in the middle of building one — true at the instant it printed,
+  // and evidence of nothing. `requestProfile` calls this again from a
+  // `finally`, so a map that never arrives still releases the line.
+  if (pendingScanSmoke === null || profileInFlight) return;
+  const outcome = pendingScanSmoke;
+  pendingScanSmoke = null;
+  reportScanToSmoke(outcome);
+}
+
+/**
+ * Buttons of the question currently being asked.
  *
  * Every turn stays on screen forever, because a conversation is a record and
  * S2's proof turn has to still be there after the interview scrolls past it.
  * That means the buttons of ANSWERED questions are still on screen too, and a
- * live one would land its answer against whatever question is current now.
- * So the button is disabled the moment its question is answered.
+ * live one would land its answer against whatever question is current now. So
+ * they are disabled the moment their question is answered.
  */
-let pendingDontKnow: HTMLButtonElement | null = null;
+let pendingButtons: HTMLButtonElement[] = [];
 
 function composerInput(): HTMLInputElement {
   return byId('composer-input', HTMLInputElement);
@@ -690,15 +781,27 @@ function composerSend(): HTMLButtonElement {
 }
 
 function beginInterview(): void {
-  interview = startInterview();
-  addTurn('assistant').append(el('p', undefined, t('interview.intro')));
-  askQuestion();
-
-  composerInput().disabled = false;
-  composerSend().disabled = false;
-  composerInput().focus();
+  interviewRequested = true;
+  void window.ledar
+    .interviewForm()
+    .then((form) => {
+      interview = startInterview(form);
+      addTurn('assistant').append(el('p', undefined, t('interview.intro')));
+      askQuestion();
+      // The first question is on screen before this, so the smoke run proves
+      // the interview reached a person-shaped surface and THEN skips it.
+      if (devAutoSkip) skipAll();
+    })
+    .catch(() => {
+      // The question set could not be fetched. The report above is unaffected
+      // — it was written before this ran and says nothing that depended on it
+      // — so the failure costs the interview and nothing else.
+      addTurn('assistant').append(el('p', undefined, t('interview.unavailable')));
+    })
+    .finally(releaseScanSmoke);
 }
 
+/** One question: the three-way answer row, and the list that follows a yes. */
 function askQuestion(): void {
   if (interview === null) return;
   const question = currentQuestion(interview);
@@ -709,58 +812,145 @@ function askQuestion(): void {
 
   const bubble = addTurn('assistant');
   const card = el('div', 'card');
-  // A counter over a single question is chrome pretending to be progress.
-  if (total > 1) card.append(el('p', 'kicker', t('interview.progress', { n, total })));
-  card.append(el('h3', undefined, t(`interview.${question.id}.text`)));
-  card.append(el('p', 'meta', t(`interview.${question.id}.hint`)));
+  card.append(el('p', 'kicker', t('interview.progress', { n, total })));
+  card.append(el('h3', undefined, t(`interview.area.${question.area}`)));
 
-  if (question.isRule) {
-    card.append(el('p', 'kicker', t('interview.rule.examples')));
-    const examples = el('ul', 'steps');
-    examples.append(
-      el('li', undefined, t('interview.rule.example.1')),
-      el('li', undefined, t('interview.rule.example.2')),
-      el('li', undefined, t('interview.rule.example.3')),
-    );
-    card.append(examples);
-  }
-
-  // Peer-level with the answer box, not a faded link (_doc/25 S3), and
-  // worded as an instruction rather than an admission (ideal §13 audit):
-  // skipping is a normal state, not a confession to be typed out.
-  const dontKnow = el('button', 'button', t('interview.dont-know'));
-  dontKnow.type = 'button';
-  dontKnow.addEventListener('click', () => {
-    if (interview === null) return;
-    applyAnswer(answerDontKnow(interview), t('interview.dont-know.said'));
-  });
   const actions = el('div', 'actions');
-  actions.append(dontKnow);
+  pendingButtons = [];
+
+  // Three peers, in the order a person reads them. "I do not know" is NOT a
+  // faded third choice: ideal §13's audit says not knowing is where every
+  // system starts, and the label is a work order rather than a confession.
+  const choose = (value: AreaReply['answer'], label: string): HTMLButtonElement => {
+    const button = el('button', 'button', label);
+    button.type = 'button';
+    button.addEventListener('click', () => {
+      if (interview === null) return;
+      if (value === 'yes' && question.options.length > 0) {
+        lockButtons();
+        addTurn('user').append(el('p', undefined, label));
+        askOptions(question);
+        return;
+      }
+      applyAnswer(answer(interview, { answer: value }), label);
+    });
+    pendingButtons.push(button);
+    return button;
+  };
+
+  actions.append(
+    choose('yes', t('interview.yes')),
+    choose('no', t('interview.no')),
+    choose('dont_know', t('interview.dont-know')),
+  );
   card.append(actions);
 
-  bubble.append(card);
-  pendingDontKnow = dontKnow;
+  // Available at every step, and expected to be the most-used control in the
+  // product for this ICP. Set apart from the three answers because it ends
+  // the interview rather than answering this question.
+  const skip = el('button', 'button small', t('interview.skip-all'));
+  skip.type = 'button';
+  skip.addEventListener('click', () => skipAll());
+  pendingButtons.push(skip);
+  card.append(skip);
 
-  composerInput().placeholder = t('interview.answer.placeholder');
+  bubble.append(card);
   chat.scrollTop = chat.scrollHeight;
+}
+
+/**
+ * The follow-up list, shown only after a yes.
+ *
+ * Checkboxes rather than one choice: a system can use two of these at once,
+ * and forcing a single pick collects a tidier answer that is less true.
+ */
+function askOptions(question: InterviewQuestion): void {
+  const bubble = addTurn('assistant');
+  const card = el('div', 'card');
+  card.append(el('h3', undefined, t(`interview.which.${question.area}`)));
+
+  const list = el('div', 'section-body');
+  const boxes: HTMLInputElement[] = [];
+  for (const id of question.options) {
+    const row = el('label', 'option-row');
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.value = id;
+    boxes.push(box);
+    row.append(box, el('span', undefined, optionLabel(id)));
+    list.append(row);
+  }
+  card.append(list);
+
+  pendingButtons = [];
+  const done = el('button', 'button primary', t('interview.confirm'));
+  done.type = 'button';
+  done.addEventListener('click', () => {
+    if (interview === null) return;
+    const picked = boxes.filter((b) => b.checked).map((b) => b.value);
+    for (const box of boxes) box.disabled = true;
+    applyAnswer(
+      answer(interview, { answer: 'yes', picked }),
+      picked.length === 0
+        ? t('interview.picked.none')
+        : picked.map(optionLabel).join(', '),
+    );
+  });
+  pendingButtons.push(done);
+
+  const actions = el('div', 'actions');
+  actions.append(done);
+  card.append(actions);
+  bubble.append(card);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+/**
+ * The label for one option id.
+ *
+ * Falls back to the raw id, deliberately and visibly. See `isMessageKey`:
+ * the fallback is unreachable in a correct build and exists so that a
+ * contract change without a label here is SEEN rather than rendered blank.
+ */
+function optionLabel(id: string): string {
+  const key = `interview.option.${id}`;
+  return isMessageKey(key) ? t(key) : id;
+}
+
+/**
+ * Ends the interview here and keeps everything already said.
+ *
+ * A function rather than the button's handler because the smoke run presses
+ * it too (`bootDev`), and a second path that skips by hand would be a second
+ * definition of what skipping means.
+ */
+function skipAll(): void {
+  if (interview === null) return;
+  lockButtons();
+  addTurn('user').append(el('p', undefined, t('interview.skip-all.said')));
+  interview = skipRest(interview);
+  finishInterview();
+}
+
+function lockButtons(): void {
+  for (const button of pendingButtons) button.disabled = true;
+  pendingButtons = [];
 }
 
 function applyAnswer(result: AnswerResult, echo: string): void {
   if (!result.ok) {
-    if (result.reason === 'too-long') {
-      addTurn('assistant').append(el('p', undefined, t('interview.too-long')));
+    // `unknown-option` cannot be reached by clicking — the boxes are built
+    // from the options the main side sent. It is reported rather than
+    // swallowed because the only ways to produce one are a bug or a console,
+    // and a silent no-op would hide both.
+    if (result.reason === 'unknown-option') {
+      addTurn('assistant').append(el('p', undefined, t('interview.unknown-option')));
       chat.scrollTop = chat.scrollHeight;
     }
     return;
   }
 
-  if (pendingDontKnow !== null) {
-    pendingDontKnow.disabled = true;
-    pendingDontKnow = null;
-  }
-
-  // The person's own words, as text. Nothing here parses them, and nothing
-  // here sends them anywhere.
+  lockButtons();
   addTurn('user').append(el('p', undefined, echo));
 
   interview = result.interview;
@@ -768,51 +958,325 @@ function applyAnswer(result: AnswerResult, echo: string): void {
   else askQuestion();
 }
 
-function submitAnswer(): void {
-  if (interview === null) return;
-  const input = composerInput();
-  const raw = input.value;
-  const result = answerTyped(interview, raw);
-  if (result.ok) input.value = '';
-  else input.focus();
-  applyAnswer(result, raw.trim());
-}
-
 function finishInterview(): void {
   if (interview === null) return;
 
   const bubble = addTurn('assistant');
   bubble.append(el('p', 'lead', t('interview.done.heading')));
-  bubble.append(el('p', undefined, t('interview.done.kept')));
+
+  const replies = repliesOf(interview);
+  const said = replies.filter((r) => r.answer !== 'dont_know').length;
 
   const card = el('div', 'card');
-  const rule = ruleSentence(interview);
-  if (rule === null) {
-    // No sentence, so no rule — and the product does not assemble one out of
-    // the five other answers to avoid an awkward silence. That invention is
-    // the exact failure VS-6 exists to not have.
-    card.append(el('p', undefined, t('interview.done.no-rule')));
+  if (said === 0) {
+    // Everybody skipped, or said "I do not know" throughout. Not a failure and
+    // not phrased as one — ideal §13's audit expects this to be the most
+    // common ending for this ICP, and the product's job from here is to go and
+    // look rather than to ask again.
+    card.append(el('p', undefined, t('interview.done.nothing-said')));
   } else {
-    card.append(el('p', 'kicker', t('interview.done.rule.heading')));
-    // Quoted as EVIDENCE — their words, unchanged. This is NOT the read-back:
-    // nothing has read this sentence, mapped it to a table, or checked
-    // anything, and the line under it says so rather than letting a quote in
-    // a card imply otherwise (_doc/26 is where that screen gets designed).
-    const quote = el('p', 'mono');
-    quote.textContent = rule;
-    card.append(quote);
-    card.append(el('p', undefined, t('interview.done.rule.next')));
-    card.append(el('p', undefined, t('interview.done.rule.then')));
+    card.append(el('p', undefined, t('interview.done.kept', { n: said })));
   }
+
+  card.append(el('p', 'meta', t('interview.done.next')));
   bubble.append(card);
 
-  const input = composerInput();
-  input.value = '';
-  input.disabled = true;
-  input.placeholder = t('composer.done');
-  composerSend().disabled = true;
+  chat.scrollTop = chat.scrollHeight;
+
+  // The answers go over as they were given, including nothing at all. An
+  // interview somebody walked away from sends the part they answered, and
+  // `reconcile` leaves the rest `unknown` — which is true — rather than
+  // `dont_know`, which would be words in their mouth (`interview.ts`).
+  requestProfile(replies);
+}
+
+// ---- the map: what was said, put beside what was seen ----------------------
+
+/**
+ * Ideal §23, and the second half of ideal §12's audit:
+ *
+ * > *"Scan trước (rẻ, tự động) → Trình bày cái tìm được → User chỉ bấm
+ * > Đúng/Sai. Câu hỏi cũ đòi KIẾN THỨC; câu hỏi mới chỉ đòi XÁC NHẬN điều đã
+ * > thấy."*
+ *
+ * The five questions asked for RECOGNITION. This screen asks for less than
+ * that: everything on it is already on the screen, and the person's whole job
+ * is to say whether what is in front of them is right.
+ *
+ * ## Why this block is replaced in place while every turn above it is not
+ *
+ * The conversation is a record and nothing in it is ever rewritten — that is
+ * the architecture decision at the top of this file. A map is not a record;
+ * it is a STATE, and the contract gives it a `version` precisely because
+ * ideal §24 expects it to be edited. Rendering a second copy of all five
+ * areas under the first would leave two maps on screen disagreeing with each
+ * other, and a reader scrolling back would have no way to tell which one the
+ * product currently believes.
+ *
+ * So: one block, always the newest facts, and the version on it. The person's
+ * ACTIONS still leave a record — that is what `verified` is, and it is a
+ * sturdier one than a chat echo because it is dated and travels with the map.
+ */
+let profileBlock: HTMLDivElement | null = null;
+
+/** The newest map, kept for the smoke line and for redrawing after a refusal. */
+let profileFacts: ProfileFacts | null = null;
+
+/** Set when the map is first asked for, so the smoke line can tell three states apart. */
+let profileRequested = false;
+
+/** True between asking for a map and getting an answer, of either kind. */
+let profileInFlight = false;
+
+/** One confirmation at a time; the map is rebuilt from whatever comes back. */
+let confirming = false;
+
+function requestProfile(replies: readonly AreaReply[]): void {
+  profileRequested = true;
+  profileInFlight = true;
+  void window.ledar
+    .saveProfile(replies)
+    .then((facts) => {
+      renderProfile(facts, null);
+      announce(t('announce.profile'));
+    })
+    .catch(() => {
+      // Everything above this is untouched by the failure — the report was
+      // written from the database before any of this ran, and what the person
+      // said is still in the turns where they said it. So the sentence says
+      // what was lost and nothing more alarming than that.
+      //
+      // A map that could not be built because nothing has been scanned lands
+      // here too. `saveProfile` on the contract promises a `ProfileFacts` and
+      // has no way to say *there is nothing for these answers to be about*,
+      // so the main side's way of saying it arrives as a value this window
+      // cannot read — which is a failure, and is reported as one.
+      addTurn('assistant').append(el('p', undefined, t('profile.unavailable')));
+      chat.scrollTop = chat.scrollHeight;
+    })
+    .finally(() => {
+      profileInFlight = false;
+      releaseScanSmoke();
+    });
+}
+
+/**
+ * Draws the map, or redraws it.
+ *
+ * `refocus` is the area whose control was just pressed. The block is rebuilt
+ * whole, so the button that was under the person's finger no longer exists —
+ * without this, a keyboard user's focus falls to the top of the document and
+ * they have to find their place again.
+ */
+function renderProfile(facts: ProfileFacts, refocus: ProfileArea | null): void {
+  profileFacts = facts;
+
+  if (profileBlock === null) {
+    const bubble = addTurn('assistant');
+    bubble.append(el('p', undefined, t('profile.intro')));
+    profileBlock = el('div', 'map');
+    bubble.append(profileBlock);
+  }
+
+  const cards = new Map<ProfileArea, HTMLElement>();
+  profileBlock.replaceChildren(...mapParts(facts, cards));
+
+  if (refocus !== null) {
+    const card = cards.get(refocus);
+    if (card !== undefined) {
+      card.tabIndex = -1;
+      card.focus();
+      card.scrollIntoView({ block: 'nearest' });
+      return;
+    }
+  }
   chat.scrollTop = chat.scrollHeight;
 }
+
+function mapParts(facts: ProfileFacts, cards: Map<ProfileArea, HTMLElement>): HTMLElement[] {
+  const parts: HTMLElement[] = [];
+
+  // 🟥 First, above everything. A disagreement is the one thing on this
+  // screen that neither half of the product could have produced alone, and
+  // the direction that matters most is the question they did not know to ask
+  // — putting it under five cards they have to read first is how it gets
+  // missed by the person it was found for.
+  if (facts.conflicts.length > 0) {
+    const body = el('div', 'section-body');
+    for (const conflict of facts.conflicts) body.append(conflictCard(conflict));
+    parts.push(reportSection(t('profile.conflicts.heading'), body));
+  }
+
+  // In the order the main side sent them, which is the contract's order.
+  // Sorting by rung here would put the areas in a different order on every
+  // run, and a map somebody returns to is worth being able to read from
+  // memory. It would also quietly rank the rungs, which ideal §22 says is
+  // exactly what they are not.
+  const areas = el('div', 'section-body');
+  for (const area of facts.areas) {
+    const card = areaCard(area);
+    cards.set(area.area, card);
+    areas.append(card);
+  }
+  parts.push(reportSection(t('profile.areas.heading'), areas));
+
+  const notes = el('div', 'run-notes');
+  notes.append(el('p', 'meta', t('profile.version', { n: facts.version })));
+  // Disclose and Admit, and NOT in `meta`. `_doc/25`'s own gate asks every
+  // screen where it has not looked and where it does not know; these are this
+  // screen's two answers, and the argument `.cut-short` makes applies here —
+  // a grey aside saying the map was built without reading any data is how a
+  // reader concludes the map was built by reading their data.
+  notes.append(el('p', 'admit', t('profile.method')));
+  notes.append(el('p', 'admit', t('profile.no-path')));
+  parts.push(notes);
+
+  return parts;
+}
+
+/**
+ * One area, drawn as the rung it is actually on.
+ *
+ * The rungs mean different things and `profile-shape.ts` holds the rule that
+ * they may not look alike. What is here is the copy that goes with the shape,
+ * and one thing the shape cannot carry: `suspected` and `observed` get the
+ * SAME control, because the person is being asked the same question either
+ * way — *is this right?* — and only the card around it differs.
+ */
+function areaCard(area: AreaFacts): HTMLElement {
+  const shape = shapeForRung(area.state);
+  const card = el('article', `card rung ${shape.tone}`);
+
+  const head = el('div', 'rung-head');
+  if (shape.icon !== null) head.append(icon(shape.icon, 'rung-icon'));
+  head.append(el('span', 'kicker', t(`profile.state.${area.state}`)));
+  card.append(head);
+
+  card.append(el('h3', undefined, t(`profile.area.${area.area}`)));
+  card.append(el('p', undefined, t(`profile.state.${area.state}.body`)));
+
+  // What they said, kept beside what was seen. Null on `unknown` (nobody
+  // said) and on `verified` (the agreement supersedes the answer), and the
+  // contract says which — nothing here reads a meaning out of the absence.
+  if (area.stated !== null) card.append(el('p', 'meta', t(`profile.said.${area.stated}`)));
+
+  if (area.evidence.length > 0) card.append(evidenceBlock(area.evidence));
+
+  if (shape.confirmable) {
+    const actions = el('div', 'actions');
+    actions.append(confirmButton(area.area));
+    card.append(actions);
+  }
+
+  return card;
+}
+
+/**
+ * Where it was seen, and why that was read as meaning something.
+ *
+ * Both come from the backend and both go on screen as received. `why` is the
+ * step rather than the conclusion — *this column's name contains "stripe"* —
+ * so a person can disagree with the reasoning instead of only with the
+ * result, and rewriting it here would take that away.
+ */
+function evidenceBlock(evidence: AreaFacts['evidence']): HTMLElement {
+  const block = el('div', 'evidence-block');
+  block.append(el('p', 'kicker', t('profile.evidence.heading')));
+
+  const list = el('ul', 'evidence');
+  for (const item of evidence) {
+    const row = el('li');
+    const where = el('span', 'mono where');
+    where.textContent = item.where;
+    const why = el('span', 'why');
+    why.textContent = item.why;
+    row.append(where, why);
+    list.append(row);
+  }
+  block.append(list);
+  return block;
+}
+
+/**
+ * The only control in this product that can produce `verified`.
+ *
+ * Offered only where `profile-shape.ts` says it may be, which is the two
+ * rungs that have evidence on the card. The main side refuses the rest, and
+ * a window that offered a button the other side declines would be teaching
+ * somebody that pressing things here does nothing.
+ */
+function confirmButton(area: ProfileArea): HTMLButtonElement {
+  const button = el('button', 'button', t('profile.confirm'));
+  button.type = 'button';
+  button.addEventListener('click', () => {
+    if (confirming) return;
+    confirming = true;
+    button.disabled = true;
+
+    void window.ledar
+      .confirmArea(area)
+      .then((facts) => {
+        renderProfile(facts, area);
+        announce(t('announce.profile.confirmed', { area: t(`profile.area.${area}`) }));
+      })
+      .catch(() => {
+        // Nothing was recorded, so the map already on screen is still the
+        // true one — it is redrawn rather than left standing with a dead
+        // button, because a control that has been pressed and stayed down is
+        // indistinguishable from one still thinking about it.
+        if (profileFacts !== null) renderProfile(profileFacts, area);
+        announce(t('profile.confirm.failed'));
+        addTurn('assistant').append(el('p', undefined, t('profile.confirm.failed')));
+        chat.scrollTop = chat.scrollHeight;
+      })
+      .finally(() => {
+        confirming = false;
+      });
+  });
+  return button;
+}
+
+/**
+ * A disagreement, in the direction it actually points.
+ *
+ * 🟥 The two directions are not phrased alike and must never be. One is about
+ * their system and is the most valuable thing this product can produce; the
+ * other is about the edge of what this product can see. `conflictsIn` in the
+ * contract says what getting it wrong would be: *"the product mistaking the
+ * edge of its own vision for the edge of the world."*
+ *
+ * The evidence is shown here as well as on the area's own card below. That
+ * repeat is deliberate and has a precedent one screen up: the report prints
+ * its scope strip at the top AND the bottom, because a card that cannot be
+ * read on its own is a card that gets read out of context by whoever lands
+ * on it first.
+ */
+function conflictCard(conflict: ProfileFacts['conflicts'][number]): HTMLElement {
+  const shape = shapeForDirection(conflict.direction);
+  const card = el('article', `card conflict ${shape.tone}`);
+
+  const head = el('div', 'proof');
+  const badge = el('span', 'proof-icon');
+  badge.append(icon(shape.icon));
+  const words = el('div');
+  words.append(
+    el('p', 'kicker', t(`profile.area.${conflict.area}`)),
+    el('h3', undefined, t(`profile.conflict.${conflict.direction}.headline`)),
+  );
+  head.append(badge, words);
+  card.append(head);
+
+  card.append(el('p', undefined, t(`profile.conflict.${conflict.direction}.body`)));
+
+  // Empty in the direction that has nothing to show — a thing we could not
+  // see leaves no evidence, and that IS the finding. Rendered when it is
+  // there rather than switched on the direction, so a future conflict that
+  // does carry sightings does not arrive with nowhere to put them.
+  if (conflict.evidence.length > 0) card.append(evidenceBlock(conflict.evidence));
+
+  return card;
+}
+
 
 // ---- conversation states ---------------------------------------------------
 
@@ -823,6 +1287,9 @@ let devMode = false;
 
 /** Smoke run only: nobody is there to press the scan button. */
 let devAutoScan = false;
+
+/** Smoke run only: nobody is there to answer five questions either. */
+let devAutoSkip = false;
 
 /** The connect half of a smoke line whose scan half has not happened yet. */
 let pendingSmokeHead: string | null = null;
@@ -1016,15 +1483,78 @@ function reportScanToSmoke(outcome: ScanOutcome | null): void {
       `strip=${outcome.scopeStrip.trim() === '' ? 'MISSING' : 'yes'}`,
       `cost=${outcome.costLine.trim() === '' ? 'MISSING' : 'yes'}`,
       `history_lines=${outcome.historyLines.length}`,
+      // The two things this slice added, in the only form allowed here.
+      //
+      // `kinds` is contract VOCABULARY — five fixed words from `ClaimKind`,
+      // sorted, never a sentence and never a table name. Before N49 this line
+      // could not have printed it at all: the bridge did not carry the kinds,
+      // and the nearest available stand-in would have been counting non-null
+      // boundaries, which is the inference the debt was about.
+      //
+      // `cut` says WHETHER the budget's disclosure reached the screen, never
+      // what it said. Absent is a real state (nothing was refused), so it gets
+      // a word of its own rather than an empty string.
+      `kinds=${[...new Set(outcome.findings.map((f) => f.kind))].sort().join(',') || 'none'}`,
+      `cut=${outcome.disclosure === null ? 'none' : 'shown'}`,
+      // N50, as a fraction rather than a boolean. The type already forbids
+      // null, so what is left to measure is the failure the type cannot see:
+      // an empty string, which renders as a card with a blank line where the
+      // limit of the measurement should be. `4/4` is the only reading that
+      // means every finding on screen said how far it looked.
+      `bounds=${outcome.findings.filter((f) => f.boundary.trim() !== '').length}/${outcome.findings.length}`,
     );
   }
 
-  const asked = interview === null ? 'none' : (currentQuestion(interview)?.id ?? 'finished');
-  parts.push(`interview=${asked}`, `of=${INTERVIEW_QUESTIONS.length}`);
+  // Three states, not two: never started, asked for and not yet arrived, and
+  // running. `of` is only a number once there is a set to count.
+  const asked =
+    interview !== null
+      ? (currentQuestion(interview)?.area ?? 'finished')
+      : interviewRequested
+        ? 'loading'
+        : 'none';
+  parts.push(`interview=${asked}`, `of=${interview === null ? '?' : interview.questions.length}`);
+  parts.push(...profileToSmoke());
 
   const head = pendingSmokeHead;
   pendingSmokeHead = null;
   window.ledar.devReport(head === null ? parts.join(' ') : `${head} ${parts.join(' ')}`);
+}
+
+/**
+ * The map, in the only form this line is allowed to carry.
+ *
+ * Counts of RUNGS, and the vocabulary of the ladder — five fixed words that
+ * came from `@ledar/contracts`. Never an area beside a rung: *"observed:
+ * payment"* is a sentence about somebody's business, and this line is read
+ * off a terminal by whoever is running the smoke.
+ *
+ * Every rung is printed, including the ones at zero. A rung that only appears
+ * when it is non-zero would make its absence mean something, which is the
+ * shape debt N49 was about — and here it would be worse than usual, because
+ * the counts always sum to the number of areas, so a reader could not tell a
+ * missing rung from a miscount.
+ */
+function profileToSmoke(): string[] {
+  if (profileFacts === null) {
+    // `?` and not `0`. Zero conflicts is a real and reassuring answer; no map
+    // at all is not an answer about conflicts in either direction.
+    return [`profile=${profileRequested ? 'failed' : 'none'}`, 'conflicts=?', 'conflict_dirs=?'];
+  }
+
+  const facts = profileFacts;
+  const counts = EVERY_RUNG.map(
+    (rung) => `${rung}:${facts.areas.filter((a) => a.state === rung).length}`,
+  ).join(',');
+  const directions = [...new Set(facts.conflicts.map((c) => c.direction))].sort().join(',');
+
+  return [
+    `profile=${counts}`,
+    `conflicts=${facts.conflicts.length}`,
+    // The two directions mean opposite things and get opposite treatments, so
+    // the count alone would not say which of the two was on screen.
+    `conflict_dirs=${directions || 'none'}`,
+  ];
 }
 
 function renderOutcome(outcome: ConnectOutcome): void {
@@ -1160,9 +1690,19 @@ function bootChrome(): void {
   const composerInput = byId('composer-input', HTMLInputElement);
   composerInput.placeholder = t('composer.waiting');
   byId('composer-send', HTMLButtonElement).textContent = t('composer.send');
+  // 🟥 The composer accepts nothing and submits nothing, as of 2026-08-27.
+  //
+  // It existed to carry one free-text answer into a model. There is no free
+  // text in this product any more (`interview.ts` says why), so the handler
+  // that used to send one is gone rather than left pointing at a function
+  // that does nothing — a live control wired to a no-op is worse than a
+  // disabled one, because it looks like it works.
+  //
+  // The element stays in the page because S7 (asking about a finding) will
+  // need it, and because removing it would move every other control on the
+  // screen for a slice that has not been designed yet.
   byId('composer', HTMLFormElement).addEventListener('submit', (event) => {
     event.preventDefault();
-    submitAnswer();
   });
 }
 
@@ -1174,6 +1714,17 @@ async function bootDev(): Promise<void> {
   // sitting in front of still waits for them to read the proof and press the
   // button — that sequence is the product, not a formality to skip in dev.
   devAutoScan = prefill.autoconnect;
+
+  // 🟥 And the interview only answers itself on the run that is ALSO about to
+  // quit on its own, which is the one with nobody in it. A developer watching
+  // an autoconnecting window still gets to answer five questions.
+  //
+  // What it presses is the real control — "skip all of this, just go and
+  // look" — and not a shortcut past it, because that button IS the honest
+  // answer when nobody is there. Without this the smoke line could only ever
+  // report `profile=none`: the map is built when the interview ends, and an
+  // interview waiting on a person who does not exist never ends.
+  devAutoSkip = prefill.autoconnect && prefill.exitWhenProven;
   await startGuide();
   if (guideRefs !== null) {
     guideRefs.input.value = prefill.dsn;

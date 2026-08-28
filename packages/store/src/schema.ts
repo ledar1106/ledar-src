@@ -70,8 +70,36 @@ import type { DatabaseSync } from 'node:sqlite';
  * D.4's acceptance criterion is *measure from day one*. A cost table added
  * after the bills start arriving can only describe spending from the day
  * somebody noticed, and the interesting spending is always earlier.
+ *
+ * 5 → 6, `finding.boundary` became NOT NULL — debt N50. Schema 5 held a CHECK
+ * saying a boundary was present if and only if the kind was `negative`, which
+ * forbade an abstention the sentence the contract makes its entire content;
+ * the write path dropped it silently and the read path threw on the way back.
+ * SQLite cannot loosen a CHECK in place, so the shape changed and the version
+ * had to follow.
+ *
+ * ⚠️ This paragraph is written on 2026-08-28, after the fact — the bump landed
+ * on 2026-08-27 and nobody added one, so this list read 1 → 2 → 3 → 4 → 5 for
+ * a file already at 6. That is the SECOND time this list has been caught a
+ * version behind, and the warning against it is four paragraphs up, written
+ * the first time. A rule that has been broken twice is not being enforced by
+ * the paragraph that states it.
+ *
+ * 6 → 7, `project_profile` and `project_profile_area` — ideal §23. New tables
+ * rather than new columns, so nothing already written changes shape and a
+ * schema-6 file is still readable by `RetiredHistoryReader` (its `REQUIRED`
+ * list does not mention either table). The bump is owed for the same reason
+ * 4 → 5 owed one: this store refuses every version it does not speak, and
+ * *"it would probably work"* is not what that refusal was built to hold.
+ *
+ * The cost of this bump is the cheapest it will ever be, and that is an
+ * argument about TIMING rather than the discredited one about nobody having a
+ * history file. What it costs is one retirement per machine: `openHistory`
+ * moves `history.db` to `history.v6.db` byte for byte and the scan says where
+ * it went. The same bump after the profile has been asked for a year would
+ * cost people the answers they gave.
  */
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 7;
 
 /**
  * The closed vocabularies, copied here on purpose — and tripwired.
@@ -115,13 +143,25 @@ const EGRESS_CLASSES =
   "'never-leaves', 'customer-system-metadata', 'product-constant'";
 const USER_STATUSES = "'unreviewed', 'confirmed', 'rejected', 'intentional'";
 /**
- * The languages a run can be rendered in. Debt N44.
+ * The languages a run may have been rendered in. Debt N44.
  *
  * A copy of `LANGS` from contracts, here for the same reason every other list
  * on this page is: the DDL cannot import TypeScript, so it holds its own copy
  * and `STORE_VOCABULARY` exposes it to the tripwire test that compares the two.
  * A copy nobody compares is how two sources of truth drift; a copy something
  * compares is a fence.
+ *
+ * 🟥 **This one is deliberately WIDER than `LANGS`, and 2026-08-27 is when it
+ * became so.** The product dropped Vietnamese; `LANGS` is `['en']` now. This
+ * list keeps `vi`, and narrowing it would be the file lying about its own past:
+ * a run recorded in Vietnamese HAPPENED in Vietnamese, and a history that
+ * cannot admit the language its own rows carry is not a record.
+ *
+ * The relation between the two lists is therefore a SUPERSET, not equality —
+ * see `vocabulary.test.ts`. Equality was right for as long as every vocabulary
+ * only ever grew, and it stopped being right the first time one shrank. What
+ * the store may HOLD and what the product currently RENDERS are two questions,
+ * and they were the same question only by luck.
  */
 const LANGS_SQL = "'en', 'vi'";
 
@@ -135,6 +175,41 @@ const LANGS_SQL = "'en', 'vi'";
  */
 const LLM_OUTCOMES_SQL = "'ok', 'failed', 'refused'";
 
+/**
+ * The five things the product asks about. Ideal §14–§18, a copy of
+ * `ProfileArea`.
+ *
+ * A CHECK rather than free text, and the reason is what an area NAME is for.
+ * Every screen, every plan and every conflict is keyed by one of these five
+ * strings, so a sixth arriving from a hand-edit or an older build does not
+ * read as a bad value — it reads as an area nobody renders, silently absent
+ * from the map while sitting in the file.
+ */
+const PROFILE_AREAS_SQL = "'auth', 'database', 'payment', 'storage', 'jobs'";
+
+/**
+ * The rungs of the knowledge ladder. Ideal §22, a copy of `KnowledgeState`.
+ *
+ * 🟥 The list is closed here because the CONSTRAINTS below are written per
+ * rung. A state outside this list would fall through every one of them — each
+ * is phrased `state <> 'x' OR (...)` — and land in the file carrying whatever
+ * combination of columns the writer felt like. The value list is what makes
+ * the four constraints add up to a total rule rather than four partial ones.
+ */
+const KNOWLEDGE_STATES_SQL =
+  "'unknown', 'stated', 'suspected', 'observed', 'verified'";
+
+/**
+ * The three answers a person may give. Ideal §13, a copy of `AreaAnswer`.
+ *
+ * `dont_know` is a real answer and is stored as one. It is the DEFAULT the
+ * interview starts every area at, and a file that turned it into NULL would
+ * lose the difference between somebody who said "I do not know" and somebody
+ * who was never asked — which is the whole distinction between the `stated`
+ * and `unknown` rungs.
+ */
+const AREA_ANSWERS_SQL = "'yes', 'no', 'dont_know'";
+
 /** Every list above, keyed the way the tripwire test reads them. */
 export const STORE_VOCABULARY: Readonly<Record<string, readonly string[]>> = {
   kind: KINDS.split(',').map((v) => v.trim().replace(/'/g, '')),
@@ -146,6 +221,14 @@ export const STORE_VOCABULARY: Readonly<Record<string, readonly string[]>> = {
   userStatus: USER_STATUSES.split(',').map((v) => v.trim().replace(/'/g, '')),
   lang: LANGS_SQL.split(',').map((v) => v.trim().replace(/'/g, '')),
   llmCallOutcome: LLM_OUTCOMES_SQL.split(',').map((v) => v.trim().replace(/'/g, '')),
+  profileArea: PROFILE_AREAS_SQL.split(',').map((v) => v.trim().replace(/'/g, '')),
+  knowledgeState: KNOWLEDGE_STATES_SQL.split(',').map((v) => v.trim().replace(/'/g, '')),
+  // One key, two columns. `answer` and `stated_answer` are constrained against
+  // the same list because they hold the same vocabulary said by the same
+  // person; they are separate columns because they are said at different rungs
+  // and mean different things there. The tripwire watches the LIST, and there
+  // is one list.
+  areaAnswer: AREA_ANSWERS_SQL.split(',').map((v) => v.trim().replace(/'/g, '')),
 };
 
 const DDL: readonly string[] = [
@@ -380,7 +463,10 @@ const DDL: readonly string[] = [
 
     plain_text TEXT NOT NULL,
     technical  TEXT NOT NULL,
-    boundary   TEXT,
+    -- NOT NULL as of schema 6. Debt N50: every finding states the limit of
+    -- the measurement behind it, so a row without one is a row that lost
+    -- something on the way in rather than one that never had it.
+    boundary   TEXT NOT NULL,
 
     evidence_sql         TEXT,
     evidence_row_count   INTEGER,
@@ -425,7 +511,16 @@ const DDL: readonly string[] = [
 
     UNIQUE (run_id, finding_key),
 
-    CHECK ((kind = 'negative') = (boundary IS NOT NULL)),
+    -- 🟥 Schema 5 held a CHECK saying boundary is present if and only if the
+    -- kind is 'negative', and that was WRONG in both directions before N50
+    -- was even filed. An abstention requires a boundary in the contract and
+    -- this forbade it one, so the write path dropped the sentence silently
+    -- and the read path threw. Nothing caught it because nothing produces an
+    -- abstention yet: rule-runner does, and rule-runner has no route.
+    --
+    -- The column is NOT NULL now, which says the same thing for every kind
+    -- and cannot be wrong about one of them.
+    --
     -- The same rule sealFindings enforces, kept here too: "I found nothing"
     -- is only worth reading beside "out of how many". A negative claim with
     -- no denominator must not survive a round trip through this file, whoever
@@ -526,6 +621,198 @@ const DDL: readonly string[] = [
   /** The read path: what one run spent. */
   `
   CREATE INDEX llm_call_by_run ON llm_call (run_id, at)
+  `,
+
+  /**
+   * What this product knows about one system. Ideal §23.
+   *
+   * This is the table that turns an interview into MEMORY. Without it the five
+   * questions are asked again every session, and a product that re-asks what
+   * you already told it has not remembered anything — it has a form.
+   *
+   * `database_id` is the PRIMARY KEY, and that single word is the whole of
+   * "one profile per scanned database". Saving twice is an upsert because
+   * there is nowhere for a second row to go; nothing has to remember to
+   * delete first, and no read has to pick between two profiles and guess.
+   *
+   * Keyed off `scanned_database` rather than holding a fingerprint of its own,
+   * so ON DELETE CASCADE reaches it: a history that stops holding a database
+   * stops holding what it believed about that database, in one place. A second
+   * fingerprint column here would be a second copy of the identity, and the
+   * day the two disagree there is no way to tell which one is the profile
+   * about.
+   *
+   * `version` and `updated_at` live on the profile rather than on the areas
+   * because §24 says a profile is a thing that gets EDITED, and an edit is to
+   * the map, not to one corner of it. A per-area version would let two areas
+   * claim to be different versions of one document, which is not a state the
+   * contract can express and not one anybody could read.
+   */
+  `
+  CREATE TABLE project_profile (
+    database_id INTEGER PRIMARY KEY REFERENCES scanned_database(id) ON DELETE CASCADE,
+
+    -- Positive, because a profile with no version cannot be diffed and a
+    -- version of 0 is what an uninitialised counter looks like.
+    version    INTEGER NOT NULL CHECK (version > 0),
+
+    -- Stored exactly as it arrived, NOT normalised through a date parser the
+    -- way run.started_at is. Nothing orders by this column — there is one
+    -- profile per database — so normalising would buy nothing and cost the
+    -- round trip its exactness.
+    updated_at TEXT NOT NULL CHECK (updated_at <> '')
+  ) STRICT
+  `,
+
+  /**
+   * One area of one profile, and what earns the rung it is on.
+   *
+   * ## Why rows and columns, and not one JSON blob
+   *
+   * A blob would have been less code and it would have been the wrong shape,
+   * for one reason that outweighs the rest: **the contract's `AreaKnowledge`
+   * is a discriminated union, and a union's whole content is which fields may
+   * exist at which state.** In a blob that rule lives only in the code that
+   * writes the blob — which is a validate(), and this file's header says what
+   * a validate() is worth here: it can be skipped, and the second writer of
+   * this store (an import tool, a repair script somebody runs at 2am, a person
+   * with the sqlite3 CLI) will not know it existed.
+   *
+   * As columns the rule is four CHECK constraints, and SQLite enforces them
+   * against every writer it has. The one the brief singles out —
+   * `verified_is_seen_and_agreed` — is the reason: `verified` is the only rung
+   * that means a HUMAN agreed, every later screen reads it as settled, and a
+   * file able to hold a `verified` with no evidence and no `confirmedAt` is a
+   * file able to manufacture that agreement. The type refuses it. So does this.
+   *
+   * The costs are real and are paid on purpose: five rows per profile instead
+   * of one, a join on every read, and three more copied vocabularies to keep
+   * tripwired. What is bought is that the FILE cannot hold what the contract
+   * refuses, on a machine where the contract is not installed.
+   *
+   * ## What is still a blob, and the limit of that
+   *
+   * `evidence_json` and `picked_json` are JSON arrays in a column. The
+   * constraints below reach the array — it must BE an array, and a rung that
+   * requires evidence must have at least one item — and they stop there. There
+   * is no CHECK that can look INSIDE the items, because iterating a JSON array
+   * in SQLite needs `json_each`, and `json_each` is a table-valued function,
+   * and a CHECK may not contain a subquery.
+   *
+   * So: an evidence item whose `where` is blank is refused by `saveProfile`
+   * and NOT by this file. That is stated rather than glossed, because the
+   * paragraph above claims the file enforces the union and a reader is
+   * entitled to know exactly how far that claim goes.
+   *
+   * Normalising evidence into a third table would move the boundary, not
+   * remove it — and it would move it the wrong way. Per-item CHECKs would
+   * become possible and `evidence is non-empty` would become impossible, since
+   * a CHECK cannot count rows in another table. Losing the invariant the brief
+   * calls non-negotiable to gain one on the contents is a bad trade.
+   */
+  `
+  CREATE TABLE project_profile_area (
+    database_id INTEGER NOT NULL
+      REFERENCES project_profile(database_id) ON DELETE CASCADE,
+
+    area  TEXT NOT NULL CHECK (area  IN (${PROFILE_AREAS_SQL})),
+    state TEXT NOT NULL CHECK (state IN (${KNOWLEDGE_STATES_SQL})),
+
+    -- The 'stated' rung's own content: what the person said, with nothing
+    -- measured against it.
+    answer      TEXT CHECK (answer IS NULL OR answer IN (${AREA_ANSWERS_SQL})),
+    picked_json TEXT
+      CONSTRAINT picked_is_a_list CHECK (picked_json IS NULL OR json_type(picked_json) = 'array'),
+
+    -- What the scan saw, in places a person could go and look at. Carried by
+    -- the three rungs that claim a sighting.
+    evidence_json TEXT
+      CONSTRAINT evidence_is_a_list CHECK (evidence_json IS NULL OR json_type(evidence_json) = 'array'),
+
+    -- What the person had said, kept BESIDE a sighting rather than merged into
+    -- it. A separate column from \`answer\` on purpose: one column doing both
+    -- jobs would mean a reader could not tell a claim from a claim-beside-a-
+    -- measurement without also reading \`state\`, and these are two different
+    -- kinds of knowing that the ladder's own comment forbids merging.
+    --
+    -- Nullable, and the null is load-bearing: it means the person was never
+    -- asked about an area the scan happened to find something in.
+    stated_answer TEXT
+      CHECK (stated_answer IS NULL OR stated_answer IN (${AREA_ANSWERS_SQL})),
+
+    -- When they agreed, not whether. Six months on the question is never
+    -- whether somebody once said yes; a system changes, and an agreement about
+    -- March is not an agreement about now.
+    confirmed_at TEXT,
+
+    -- ---- the union, pushed down into the file -----------------------------
+    --
+    -- Four constraints, one per rung, each named so SQLite's own error says
+    -- which rule was broken rather than only which table. Measured, not
+    -- assumed: node:sqlite reports "CHECK constraint failed:
+    -- verified_is_seen_and_agreed", and a person reading that has something
+    -- they can act on.
+    --
+    -- Every one is phrased "this rung, or nothing to check", which is why the
+    -- CHECK on \`state\` above is not decoration: an unlisted state would
+    -- satisfy all four vacuously.
+
+    CONSTRAINT unknown_says_nothing CHECK (
+      state <> 'unknown' OR (
+        answer IS NULL AND picked_json IS NULL AND evidence_json IS NULL
+        AND stated_answer IS NULL AND confirmed_at IS NULL
+      )
+    ),
+
+    -- 'stated' is a claim and only a claim. Evidence here would be a sighting
+    -- filed under the rung that means nothing was seen.
+    CONSTRAINT stated_is_only_what_was_said CHECK (
+      state <> 'stated' OR (
+        answer IS NOT NULL AND picked_json IS NOT NULL
+        AND evidence_json IS NULL AND stated_answer IS NULL
+        AND confirmed_at IS NULL
+      )
+    ),
+
+    -- 'suspected' and 'observed' differ in how strongly the same kind of
+    -- sighting is stated, so they carry the same columns and share one
+    -- constraint. An empty evidence array is refused here rather than left to
+    -- read as "seen, but we cannot say what" — which is a sentence this
+    -- product is not allowed to write.
+    CONSTRAINT a_sighting_names_what_was_seen CHECK (
+      state NOT IN ('suspected', 'observed') OR (
+        evidence_json IS NOT NULL AND json_array_length(evidence_json) >= 1
+        AND answer IS NULL AND picked_json IS NULL AND confirmed_at IS NULL
+      )
+    ),
+
+    -- 🟥 The one the whole table shape was chosen for. 'verified' is the only
+    -- rung that asserts a person agreed, and it may not exist without both
+    -- halves of what that means: something they were shown, and when they
+    -- said so. A blank \`confirmed_at\` is refused alongside a missing one,
+    -- because a whitespace timestamp passes every presence check and dates
+    -- nothing.
+    --
+    -- 🟥 \`trim()\`, not \`<> ''\` — found 2026-08-28 by writing the row with raw
+    -- SQL instead of through \`saveProfile\`. The comment above already claimed
+    -- whitespace was refused; \`confirmed_at <> ''\` accepted \`'  '\` and the
+    -- claim was false for exactly the value it named. The same hole \`saying()\`
+    -- exists to close on a finding's prose, in a column nobody would think to
+    -- look at twice.
+    --
+    -- \`stated_answer\` is NULL here because the contract's \`verified\` has
+    -- nowhere to put one: agreement replaces the comparison rather than
+    -- sitting beside it.
+    CONSTRAINT verified_is_seen_and_agreed CHECK (
+      state <> 'verified' OR (
+        evidence_json IS NOT NULL AND json_array_length(evidence_json) >= 1
+        AND confirmed_at IS NOT NULL AND trim(confirmed_at) <> ''
+        AND answer IS NULL AND picked_json IS NULL AND stated_answer IS NULL
+      )
+    ),
+
+    PRIMARY KEY (database_id, area)
+  ) STRICT
   `,
 ];
 

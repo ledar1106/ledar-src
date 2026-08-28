@@ -14,7 +14,7 @@
 
 import { DatabaseSync } from 'node:sqlite';
 
-import type { Coverage, Evidence, Finding } from '@ledar/contracts';
+import type { Coverage, Evidence, Finding, ProjectProfile } from '@ledar/contracts';
 
 import {
   assertNoCredentials,
@@ -23,7 +23,8 @@ import {
   findingKey,
   structureHash,
 } from './identity.js';
-import { SCHEMA_VERSION, applySchema } from './schema.js';
+import { readProfile, writeProfile } from './profile.js';
+import { SCHEMA_VERSION, STORE_VOCABULARY, applySchema } from './schema.js';
 import {
   bool,
   int,
@@ -60,17 +61,26 @@ import type {
 /**
  * The claim kinds this build can read back.
  *
- * Not a CHECK constraint in the DDL — that would be a second copy of a list
- * `@ledar/contracts` already owns, and copies go stale. Here it only guards
- * the read path, where a value it does not recognise is a reason to stop
- * rather than to widen.
+ * 🟥 This was a hand-typed list of FOUR names while the contract had five,
+ * and it had gone stale exactly the way its own comment warned copies do. The
+ * old note read: *"Not a CHECK constraint in the DDL — that would be a second
+ * copy of a list `@ledar/contracts` already owns, and copies go stale."* The
+ * DDL constraint it was arguing against is the one that was RIGHT: `KINDS` in
+ * `schema.ts` lists all five, and `vocabulary.test.ts` pins it to
+ * `ClaimKind.options`. This was a THIRD copy, sitting just outside the reach
+ * of the fence built to catch precisely this.
+ *
+ * Measured, before the fix: writing a finding of kind `abstained` succeeded
+ * and reading it back threw *"this build does not know"* — a build refusing
+ * to read what it had just written, blaming a newer version that did not
+ * exist.
+ *
+ * Derived from `STORE_VOCABULARY` now, so it is the same list the DDL
+ * enforces and the same list the tripwire compares. The guard it provides is
+ * unchanged and still worth having: a value from a genuinely newer build is a
+ * reason to stop rather than to widen.
  */
-const KNOWN_KINDS = new Set([
-  'observation',
-  'inference',
-  'recommendation',
-  'negative',
-]);
+const KNOWN_KINDS = new Set(STORE_VOCABULARY['kind'] ?? []);
 
 /**
  * How long a write waits for the other window before it gives up.
@@ -482,7 +492,12 @@ export class ScanStore {
     }
 
     const coverage: Coverage = finding.coverage;
-    const boundary = finding.kind === 'negative' ? finding.boundary : null;
+    // Every kind carries one since N50, so there is nothing to choose between
+    // here any more. The line this replaced read
+    // `finding.kind === 'negative' ? finding.boundary : null` and silently
+    // dropped an abstention's boundary — the field the contract makes that
+    // kind's entire content.
+    const boundary = finding.boundary;
 
     try {
       this.db
@@ -914,6 +929,43 @@ export class ScanStore {
       userStatus: text(row, 'user_status'),
     }));
   }
+
+  // ---- what this product remembers between sessions ------------------------
+  //
+  // Ideal §23. Everything above this line is a record of what HAPPENED; the
+  // profile is what the product BELIEVES, and it is the only thing in this
+  // file that a person edits directly. It lives here rather than in a JSON
+  // file beside the history for the reason the history exists at all: two
+  // stores means two things to move, two things to retire, and two answers
+  // when they disagree.
+
+  /**
+   * Writes the map for one database, replacing the one it had.
+   *
+   * One profile per scanned database — `database_id` is the primary key of
+   * `project_profile`, so a second save has nowhere to become a second row.
+   * That is a fact about the file rather than a promise made by this method,
+   * which matters because this method is not the only thing that can write to
+   * the file.
+   *
+   * Refuses a profile about a database this history has never opened a run
+   * against. `writeProfile` says why: the row it would have to create carries
+   * a label a person is supposed to have chosen.
+   */
+  saveProfile(profile: ProjectProfile): void {
+    this.tx(() => writeProfile(this.db, profile));
+  }
+
+  /**
+   * The map for one database, or null because nobody has made one.
+   *
+   * Null is not an error and is not dressed up as one. Most databases have
+   * never been asked about, and that is the ordinary case rather than a
+   * failure — the same distinction the ladder's `unknown` rung is built on.
+   */
+  loadProfile(fingerprint: string): ProjectProfile | null {
+    return readProfile(this.db, fingerprint);
+  }
 }
 
 function toStoredFinding(row: Row): StoredFinding {
@@ -981,7 +1033,11 @@ function toStoredFinding(row: Row): StoredFinding {
   } as const;
 
   const kind = text(row, 'kind');
-  const boundary = textOrNull(row, 'boundary');
+  // `text`, not `textOrNull`: the column is NOT NULL from schema 6, and a
+  // finding read back without its boundary is one this build cannot honestly
+  // hand to anything downstream — `sealFindings` would refuse it anyway, but
+  // several steps later and about a different field.
+  const boundary = text(row, 'boundary');
 
   // The cast below is unavoidable — a discriminated union cannot be built
   // from a string the compiler has never seen — so the string is checked
@@ -996,11 +1052,7 @@ function toStoredFinding(row: Row): StoredFinding {
     );
   }
 
-  const finding = (
-    kind === 'negative'
-      ? { ...common, kind, boundary }
-      : { ...common, kind }
-  ) as unknown as Finding;
+  const finding = { ...common, kind, boundary } as unknown as Finding;
 
   return {
     runId: int(row, 'run_id'),

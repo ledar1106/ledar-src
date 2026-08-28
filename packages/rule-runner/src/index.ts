@@ -743,16 +743,24 @@ export async function runRule(
         : total > 0
           ? T('user-rule.none', { total, table: rule.table! })
           : T('user-rule.nothing-to-check', { table: rule.table! }),
-    // Only on the kinds that carry one. The contract gives `boundary` to
-    // `negative` and `abstained` and to nothing else, for a reason worth not
-    // overriding: *anything asserting that something is not wrong must state
-    // where it looked*. An observation asserts the opposite.
+    // One sentence for all three kinds, and it was always the right one for
+    // all three: *I checked the rule exactly as it was read back to you; I did
+    // not check whether that is the rule you meant.* That limits a rule which
+    // found rows exactly as much as it limits one which found none.
     //
-    // The caveat an observation still needs — I checked the rule as it was
-    // read back, not that it is the rule you meant — is deliberately NOT
-    // repeated per finding. It is true of every user rule in the report at
-    // once, and VS-7 already caught what per-finding repetition costs: one
-    // sentence printed three times in sixty lines stops being read.
+    // The old note here argued the opposite — that `boundary` belonged only to
+    // the kinds asserting nothing is wrong, because *"an observation asserts
+    // the opposite"*. The asserting is the point: an observation makes a claim
+    // ABOUT somebody's data, and a claim with no stated limit is read as the
+    // whole of the matter. Debt N50.
+    //
+    // ⚠️ It is on every finding as DATA. Whether it is PRINTED beside every
+    // one is a different question with a measured answer: `buildUserRuleSection`
+    // suppresses a boundary that every entry in the section shares, because
+    // VS-7 found what per-finding repetition costs — one sentence printed
+    // three times in sixty lines stops being read — and `scan.you-asked-preamble`
+    // already carries this one once, above the list.
+    boundary: T('user-rule.boundary'),
     technical: T('user-rule.technical', {
       rule: rule.check!,
       target: `${rule.table}.${readBack}`,
@@ -776,17 +784,26 @@ export async function runRule(
 
   // Branch on the kind rather than computing it into one object literal.
   //
-  // Not style: `Finding` is a discriminated union, and `boundary` exists only
-  // on the two kinds that assert nothing is wrong. A single literal with
-  // `kind` typed as a union of three narrows to nothing, and the only ways
-  // past that are a cast or this. A cast here would be a cast on the one
+  // Not style: `Finding` is a discriminated union, and a single literal with
+  // `kind` typed as a union of three narrows to nothing. The only ways past
+  // that are a cast or this, and a cast here would be a cast on the one
   // object the whole product treats as evidence.
+  //
+  // ⚠️ The reason USED to be `boundary`, which existed on only two of the
+  // three kinds. Since N50 every finding carries one, so the boundary now
+  // sits in `common` with everything else — and it is the SAME sentence for
+  // all three branches, which was always true and only looked like a
+  // coincidence while two kinds had the field and one did not. "I checked the
+  // rule as it was read back to you; I did not check whether that is the rule
+  // you meant" limits a rule that found rows exactly as much as it limits one
+  // that found none. The narrowing problem is real and the branch stays; the
+  // duplicated sentence is gone.
   const draft: FindingDraft =
     n > 0
       ? { ...common, kind: 'observation' }
       : total > 0
-        ? { ...common, kind: 'negative', boundary: T('user-rule.boundary') }
-        : { ...common, kind: 'abstained', boundary: T('user-rule.boundary') };
+        ? { ...common, kind: 'negative' }
+        : { ...common, kind: 'abstained' };
 
   const findings = sealFindings([draft], 'rule-runner');
   return { findings, coverage: reached };

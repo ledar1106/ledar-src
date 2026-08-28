@@ -332,7 +332,7 @@ describe('the read-back, which is the only control in door ③', () => {
           unsupported: [],
         },
         CATALOG,
-      ), null, 'vi', );
+      ), null, 'en', );
     const hijacked = renderRule(sealRule(
         {
           expressible: true,
@@ -343,7 +343,7 @@ describe('the read-back, which is the only control in door ③', () => {
           unsupported: [],
         },
         CATALOG,
-      ), null, 'vi', );
+      ), null, 'en', );
     assert.notEqual(meant, hijacked);
     assert.match(hijacked, /public\.badges/);
   });

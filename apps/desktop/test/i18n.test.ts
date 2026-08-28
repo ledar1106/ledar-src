@@ -28,18 +28,44 @@ describe('the English catalogue', () => {
     assert.ok(!/\{[a-z]+\}/.test(timeouts), 'a parameter survived unfilled');
   });
 
-  it('never promises the read-back without the branch where it is refused', () => {
-    // The first real person to finish the interview wrote a rule about a
-    // number — the one shape `bounded-rule` declines outright. The copy at
-    // the time promised, flatly, to say back "which table and which column",
-    // which for that sentence was never going to happen.
+  it('🟥 the map says what it was built from, and what it cannot record', () => {
+    // 🟥 This assertion MOVED; it was not dropped, and the difference is the
+    // whole point of the entry.
     //
-    // The half pinned here is the half a tightening edit deletes first,
-    // because on its own the promise reads cleaner. It is not decoration:
-    // without it the screen states an outcome the product cannot guarantee.
-    const then = t('interview.done.rule.then');
-    assert.match(then, /If I cannot/);
-    assert.match(t('interview.done.rule.next'), /may turn out I cannot/);
+    // What stood here pinned two sentences in the closing turn of the
+    // interview: *these answers have not been checked against your database*
+    // and *nothing has been saved*. Both were true and both stopped being
+    // true in the same commit — the answers now go to the main side, meet
+    // what the scan saw, and come back as a map. Leaving the old pin would
+    // have forced the copy to keep saying something false in order to stay
+    // green, which is the worst thing a test can ask of a product.
+    //
+    // What did NOT change is the obligation. `_doc/25`'s own gate asks every
+    // screen where it has not looked (Disclose) and where it does not know
+    // (Admit), and the map has exactly two answers:
+    //
+    //   · it was built from NAMES — not one row of anybody's data was read
+    //   · a yes can be recorded here; a no has nowhere to go yet
+    //
+    // Both are the half of a sentence a tightening edit deletes first,
+    // because on its own the confident half reads cleaner.
+    const method = t('profile.method');
+    assert.match(method, /names/);
+    assert.match(method, /not read a single row/);
+
+    const noPath = t('profile.no-path');
+    assert.match(noPath, /cannot yet record/);
+  });
+
+  it('🟥 the map states its version, and says it is not the last word', () => {
+    // Ideal §24: a profile is meant to be EDITED, and it is emphatically not
+    // final truth. A screen that shows a map with no version on it, and no
+    // sentence saying it moves, is a screen that presents a guess as a
+    // settled account of somebody's system.
+    const version = t('profile.version', { n: 3 });
+    assert.ok(version.includes('3'));
+    assert.ok(!version.includes('{n}'), 'a parameter survived unfilled');
+    assert.match(version, /not the last word/);
   });
 
   it('keeps the acceptance sentence exactly as the contract writes it', () => {

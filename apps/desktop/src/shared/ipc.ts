@@ -7,10 +7,41 @@
  * authentication, and being in the same app is not either), and a boundary
  * whose surface cannot be read in one sitting is a boundary nobody audits.
  *
- * Types only, plus channel names. No imports, no runtime dependencies —
- * both compilation targets (node and browser) include this file and neither
- * should drag the other's world in through it.
+ * Types only, plus channel names. **No RUNTIME dependencies** — both
+ * compilation targets (node and browser) include this file and neither should
+ * drag the other's world in through it.
+ *
+ * ## Why the imports below are `import type`, and why they had to arrive
+ *
+ * That rule used to be written here as "no imports" and implemented that way,
+ * which cost more than it bought. `verbatimModuleSyntax` erases a type-only
+ * import completely — no `require`, no `import`, nothing in either bundle — so
+ * "no imports at all" bought the same runtime isolation and threw in something
+ * nobody meant to pay: **the compiler had no way to notice when this file and
+ * `@ledar/contracts` stopped agreeing.**
+ *
+ * They stopped agreeing. `ReportFinding` was hand-written in the shape of
+ * `Finding`, and it drifted three separate times before anyone measured it
+ * (debts N49, N50, N51 — all one cause, HANDOFF §1c). A hand-written mirror of
+ * a shared shape is a fork that renders correctly, and a screen that renders
+ * correctly is exactly what stops anyone looking.
+ *
+ * So the shapes below are DERIVED rather than described. The test is not that
+ * they look the same today — it is that a field renamed in `@ledar/contracts`
+ * has to break `tsc --build` here, in `apps/desktop`, and not only in
+ * `packages/store`. That is milestone A.2, restated as the thing that must go
+ * red rather than the thing it looks like when it is green (AGENTS §4.26).
  */
+
+import type {
+  AreaAnswer,
+  ClaimKind,
+  Finding,
+  KnowledgeState,
+  ProfileArea,
+  ProfileConflict,
+  Verdict,
+} from '@ledar/contracts';
 
 export const CHANNELS = {
   /** The SQL shown before any connection exists: create-role and undo. */
@@ -21,6 +52,12 @@ export const CHANNELS = {
   copyText: 'ledar:copy-text',
   /** Look at the connected database and record the run. Takes a session handle. */
   scan: 'ledar:scan',
+  /** The fixed question set, built from @ledar/contracts on the main side. */
+  interviewForm: 'ledar:interview-form',
+  /** Hand over what the person said; get back the map, reconciled and saved. */
+  saveProfile: 'ledar:save-profile',
+  /** The person agreed with what was shown for one area. The only path to `verified`. */
+  confirmArea: 'ledar:confirm-area',
   /** Dev-only: prefilled DSN for the smoke run. Null in a packaged build. */
   devPrefill: 'ledar:dev-prefill',
   /** Dev-only: one line the smoke run prints to stdout as its evidence. */
@@ -129,12 +166,15 @@ export type GuideBundle = {
  */
 export type SessionHandle = string;
 
-/** One rendered finding. Every sentence in it was written by the backend. */
-export type ReportFinding = {
-  /** Consequence first, in the product's own words. Rendered verbatim. */
-  plainText: string;
-  /** The same thing for whoever has to fix it. Collapsed behind a toggle. */
-  technical: string;
+/**
+ * One rendered finding. Every sentence in it was written by the backend.
+ *
+ * `plainText` and `technical` are taken FROM `Finding` rather than described
+ * again. They are the two fields the window puts on screen verbatim, so they
+ * are the two where a silent rename would show up as a blank card rather than
+ * as a build error.
+ */
+export type ReportFinding = Pick<Finding, 'plainText' | 'technical'> & {
   /**
    * Which section of the report this belongs under.
    *
@@ -142,10 +182,46 @@ export type ReportFinding = {
    * the product noticed and has NOT confirmed. They are separate because
    * `_doc/25` 3.3 makes provenance decide appearance, and a pattern styled as
    * a fact is the product claiming something it has not earned.
+   *
+   * Not on `Finding`, and correctly so: a finding does not know which pack
+   * vouched for it. This is the one field here the backend adds rather than
+   * carries.
    */
   section: 'confirms' | 'patterns';
-  /** "but only this far" — present on negatives and abstentions, never cut. */
-  boundary: string | null;
+  /**
+   * How strongly this is stated — debt N49, and the contract's own vocabulary.
+   *
+   * 🟥 Before this existed the only thing on the wire that separated a claim
+   * from a negative was `boundary` being non-null, so anything wanting to know
+   * *"is this an accusation"* had to read a meaning out of an ABSENCE. The CLI
+   * prints its coverage figures unconditionally to avoid precisely that —
+   * *"the moment this becomes a thing some reports have and others do not, its
+   * absence starts carrying a meaning nobody wrote"* — and this contract had
+   * quietly done the thing that comment exists to prevent.
+   *
+   * `ClaimKind` and not a local union: a sixth kind added in `findings.ts` has
+   * to reach every switch on this side as a compile error. A copy of the five
+   * names would go on compiling and silently file the new kind as unhandled.
+   */
+  kind: ClaimKind;
+  /**
+   * "but only this far" — the limit of the measurement, never cut.
+   *
+   * Arrives **with its lead-in already attached**, because which lead-in is
+   * right is a property of `kind`: a negative caveats a result ("but only this
+   * far"), an abstention has no result to caveat and says so instead ("and
+   * that is all I can say"). Debt N8 split those kinds precisely so a reader
+   * could tell them apart, and composing the sentence on the backend is what
+   * keeps that split alive on this surface — the window renders the string, it
+   * does not decide what kind of sentence it is.
+   *
+   * 🟥 It used to be `string | null`, and the null was debt N50 showing
+   * through: `_doc/25` S6 asked for a boundary on EVERY finding while only two
+   * of the five claim kinds carried one. N50 is paid, so the null is gone —
+   * and with it the last field on this contract whose ABSENCE meant something.
+   * Nothing else here changed, which was the point of landing `kind` first.
+   */
+  boundary: string;
 };
 
 /**
@@ -155,13 +231,14 @@ export type ReportFinding = {
  * particular `nothing_seen` — an empty database — must carry no success
  * styling at all: not a tick, not a green, nothing. That is the shape a real
  * reader misread in VS-7, and the demo shipped it wrong once already.
+ *
+ * "Straight from" is now literal. This was a hand-written copy of `Verdict`
+ * with the same four names typed out again, so the day a fifth verdict shape
+ * is added the window would have gone on compiling and rendered it as none of
+ * them. `shapeFor` in the renderer switches over these names exhaustively;
+ * aliasing the contract type is what points that switch at the real union.
  */
-export type ReportVerdict = {
-  kind: 'nothing_seen' | 'silence_with_gaps' | 'silence_is_clean' | 'raised';
-  headline: string;
-  gaps: string[];
-  meaning: string[];
-};
+export type ReportVerdict = Verdict;
 
 export type ScanOutcome =
   /** The session is gone, or was never proved. Nothing ran. */
@@ -181,6 +258,24 @@ export type ScanOutcome =
       findings: ReportFinding[];
       /** What the scan cost the database, composed by the backend. */
       costLine: string;
+      /**
+       * What the budget refused to run, in the budget's own sentence — or null
+       * when nothing was cut. Debt N51.
+       *
+       * 🟥 This field is not a nicety. `QueryBudget` exists to enforce one rule
+       * — *never cut quietly* — and its `disclosure()` is the whole of how that
+       * rule reaches a person. The CLI prints it. This window recorded it into
+       * the history file and then had nowhere to put it, so a desktop reader
+       * saw a scan finish, saw findings, and was never told that checks had
+       * been skipped because the scan hit its ceiling on their database. They
+       * would read that report as covering more than it covered.
+       *
+       * Null means nothing was cut. It does NOT mean nothing was said: an
+       * absent sentence here is the honest shape, because the sentence only
+       * exists when there is a refusal to disclose. That is the opposite of
+       * `boundary`, where absence was standing in for a claim kind.
+       */
+      disclosure: string | null;
       /** Where the run was recorded, or why it was not. Always said. */
       historyLines: string[];
       /** The SQL that takes this access away again. */
@@ -189,12 +284,122 @@ export type ScanOutcome =
 
 export type DevPrefill = { dsn: string; autoconnect: boolean; exitWhenProven: boolean } | null;
 
+/**
+ * One question of the fixed set — ideal §14–§18.
+ *
+ * 🟥 The renderer does not declare this list. It asks for it, and the answer
+ * is built from `PROFILE_AREAS` and `AREA_OPTIONS` in `@ledar/contracts`.
+ *
+ * That round trip buys one thing and it is worth the channel: the window
+ * cannot import a runtime value from contracts (nothing bundles zod into a
+ * browser context here), so the only alternative was a second copy of the
+ * area list living in the renderer. §4.27 is the whole story of what a second
+ * copy costs — a third copy of `ClaimKind` sat two hundred lines from the
+ * fence built to catch it, and a build ended up refusing to read what it had
+ * just written.
+ *
+ * `area` is `ProfileArea`, not a string: an area added to the contract has to
+ * reach every switch on this side as a compile error.
+ */
+export type InterviewQuestion = {
+  readonly area: ProfileArea;
+  /**
+   * Option ids for the follow-up shown after "yes". Empty for an area that
+   * asks only the yes/no question (§18 jobs), and empty is a DECISION here
+   * rather than an oversight — see the note on `AREA_OPTIONS`.
+   */
+  readonly options: readonly string[];
+};
+
+/** The whole set, in the order it is asked. */
+export type InterviewForm = {
+  readonly questions: readonly InterviewQuestion[];
+};
+
+/**
+ * What the person said about one area. `AreaAnswer` straight from contracts.
+ *
+ * `picked` is empty unless they answered `yes` AND the area offers options.
+ * Nothing here is treated as true: it becomes `stated` on the knowledge
+ * ladder, which is a claim, and it has to meet what the scan found before it
+ * becomes anything stronger.
+ */
+export type AreaReply = {
+  readonly area: ProfileArea;
+  readonly answer: AreaAnswer;
+  readonly picked: readonly string[];
+};
+
+/**
+ * One area of the map, as the window renders it.
+ *
+ * `state` is `KnowledgeState` from the contract, not a local union — a rung
+ * added to the ladder has to reach every switch on this side as a compile
+ * error rather than as a card that renders blank.
+ *
+ * 🟥 `evidence` is empty on exactly the rungs that have none (`unknown`,
+ * `stated`), and that is the one place on this contract where an absence
+ * carries meaning. It is allowed here and nowhere else, because `state` says
+ * which rung this is BEFORE anything reads the array — the meaning is written
+ * down in a field, and the emptiness only agrees with it.
+ */
+export type AreaFacts = {
+  readonly area: ProfileArea;
+  readonly state: KnowledgeState;
+  /** Where it was seen and why, in terms a person can go and check. */
+  readonly evidence: readonly { readonly where: string; readonly why: string }[];
+  /** What the person said about this area, or null if they have not. */
+  readonly stated: AreaAnswer | null;
+};
+
+/**
+ * The map, after what was said has been put beside what was seen.
+ *
+ * `conflicts` is `ProfileConflict` from the contract and is the most valuable
+ * thing this screen can show: the person said no, the scan found it, and that
+ * is the question they did not know to ask. The two DIRECTIONS travel intact
+ * because they mean opposite things — one is about their system, the other is
+ * about the edge of what this product can see.
+ */
+/**
+ * Re-exported so the preload bridge can name it without importing contracts.
+ *
+ * The bridge runs sandboxed and resolves nothing but this file; a type it
+ * cannot name is a call it cannot type, and an untyped bridge call is the one
+ * place a shape could drift with nothing noticing.
+ */
+export type { ProfileArea };
+
+export type ProfileFacts = {
+  readonly version: number;
+  readonly areas: readonly AreaFacts[];
+  readonly conflicts: readonly ProfileConflict[];
+};
+
 /** The API `window.ledar` exposes. The preload bridge implements exactly this. */
 export type LedarBridge = {
   guide(): Promise<GuideBundle>;
   connect(dsn: string): Promise<ConnectOutcome>;
   scan(session: SessionHandle): Promise<ScanOutcome>;
   copyText(text: string): Promise<boolean>;
+  interviewForm(): Promise<InterviewForm>;
+  /**
+   * Hands over what the person said and gets the reconciled map back.
+   *
+   * The window sends answers and receives a MAP, never the other way round:
+   * reconciling is the main side's job because that is where the scan's
+   * observations live, and a renderer that could assemble a profile could
+   * assemble one that was never measured.
+   */
+  saveProfile(replies: readonly AreaReply[]): Promise<ProfileFacts>;
+  /**
+   * The person looked at what was found for one area and agreed.
+   *
+   * 🟥 The ONLY path to `verified` in the whole product. That rung means a
+   * human signed it, every later screen reads it as settled, and nothing but
+   * a person pressing this may produce it.
+   */
+  confirmArea(area: ProfileArea): Promise<ProfileFacts>;
   devPrefill(): Promise<DevPrefill>;
   devReport(line: string): void;
 };

@@ -6,5 +6,22 @@
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "types": []
   },
-  "include": ["src/renderer/**/*", "src/shared/**/*"]
+  "include": ["src/renderer/**/*", "src/shared/**/*"],
+  "references": [
+    {
+      "comment": [
+        "Milestone A.2. `src/shared/ipc.ts` derives its shapes from",
+        "@ledar/contracts through type-only imports, so this half has to be",
+        "able to resolve the package or the build cannot check the derivation.",
+        "",
+        "It adds NOTHING to the browser bundle: `verbatimModuleSyntax` erases a",
+        "type-only import entirely, and `types: []` above still keeps Node's",
+        "globals out of the renderer. What it adds is the failure this app had",
+        "no way to produce before — a field renamed in contracts breaking",
+        "`tsc --build` on the RENDERER side, which is precisely the side that",
+        "had been reading a hand-written copy."
+      ],
+      "path": "../../packages/contracts"
+    }
+  ]
 }

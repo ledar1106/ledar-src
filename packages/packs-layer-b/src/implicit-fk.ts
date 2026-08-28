@@ -700,9 +700,35 @@ export async function runImplicitForeignKeys(
    * bug block sampling replaced.
    */
   seed: number = Date.now() % 1_000_000,
+  /**
+   * What to look at first, when the budget will not cover everything.
+   *
+   * Ideal §25. Lower comes first; a caller that passes nothing gets the order
+   * the catalog returned, which is what every caller got before this existed.
+   * The CLI passes nothing, so `npm run scan` is byte-identical — the same
+   * bargain `seed` above strikes, and for the same reason.
+   *
+   * 🟥 It orders and NEVER filters. Every candidate is still examined if the
+   * budget reaches it, and every one that is not is set aside and disclosed by
+   * name. A priority that could drop a target would be a way to narrow what a
+   * report covers while the scope strip went on saying the same thing.
+   */
+  priority: ((schema: string, table: string, column: string) => number) | null = null,
 ): Promise<LayerBOutcome> {
   const T: Translate = translator(lang);
-  const candidates = findCandidates(graph);
+  const found = findCandidates(graph);
+  // Stable: `sort` is stable in V8, so candidates of equal priority keep the
+  // order the catalog gave them. Without that, two scans of an unchanged
+  // database could examine different columns under the same ceiling, and the
+  // diff would report an attention change nobody made.
+  const candidates =
+    priority === null
+      ? found
+      : [...found].sort(
+          (a, b) =>
+            priority(a.childSchema, a.childTable, a.childColumn) -
+            priority(b.childSchema, b.childTable, b.childColumn),
+        );
   const drafts: FindingDraft[] = [];
   const notExamined: NotExaminedTarget[] = [];
   const ruledOut: RuledOutTarget[] = [];
@@ -1009,6 +1035,27 @@ export async function runImplicitForeignKeys(
               parent: c.parentTable,
               residual: num(residual, lang),
             })),
+
+      // Debt N50. Two things limit this claim and they are different in
+      // kind, so the sentence names both: how much of the table was counted
+      // (a measurement limit, and only for the sampled plan), and whether the
+      // database ever agreed these two tables are connected (an INTERPRETATION
+      // limit, true of both plans). Layer B is capped at `unconfirmed`
+      // precisely because of the second, and the boundary is where a reader
+      // meets that instead of inferring it from a confidence label.
+      boundary:
+        plan.kind === 'exact'
+          ? T('layer-b.bound.counted', {
+              table: c.childTable,
+              column: c.childColumn,
+              parent: c.parentTable,
+            })
+          : T('layer-b.bound.sampled', {
+              present: num(present, lang),
+              table: c.childTable,
+              column: c.childColumn,
+              parent: c.parentTable,
+            }),
 
       // The technical half stays in one language on purpose: it is the line
       // a person pastes into a query tool or hands to whoever built the

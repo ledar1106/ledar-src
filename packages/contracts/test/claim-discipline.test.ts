@@ -30,6 +30,13 @@ import { coverageOf } from '@ledar/contracts';
 const LAYER_B = {
   id: 'layer-b/implicit-fk/public.orders.customer_id',
   rule: 'layer-b/undeclared-reference-with-unmatched-values',
+  // N50. A real sentence rather than a placeholder, because this file is
+  // about the words a claim may use and the boundary is one of the strings
+  // the prose gate reads — an "unconfirmed" hedge here that quietly said
+  // "error" would be a hole in the very gate under test.
+  boundary:
+    'Drawn from a sample, not the whole table, and the database was never ' +
+    'told these two columns are connected.',
   kind: 'inference' as const,
   severity: 'medium' as const,
   origin: 'sampled' as const,

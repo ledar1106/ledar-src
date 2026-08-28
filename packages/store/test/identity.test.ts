@@ -33,6 +33,8 @@ function finding(over: Partial<Finding> = {}): Finding {
     columns: ['customer_id'],
     plainText: 'Three rows point at a customer that is not there.',
     technical: 'FK is NOT VALID; 3 rows have no matching parent.',
+    // N50: every finding states the limit of the measurement behind it.
+    boundary: 'Counted one constraint; validated constraints were not re-checked.',
     evidence: {
       sql: 'SELECT 1',
       rowCount: 3,

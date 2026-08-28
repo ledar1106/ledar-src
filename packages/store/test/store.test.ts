@@ -46,6 +46,8 @@ function finding(over: Partial<Finding> = {}): Finding {
     columns: ['rental_id'],
     plainText: '3 rows point at a rental record that is not there.',
     technical: 'FK damaged_rental_note_rental_fkey is NOT VALID; 3 orphans.',
+    // N50: every finding states the limit of the measurement behind it.
+    boundary: 'Counted one constraint; validated constraints were not re-checked.',
     evidence: {
       sql: 'SELECT count(*) FROM damaged_rental_note',
       rowCount: 3,

@@ -141,6 +141,14 @@ function leakyFinding(over: Record<string, unknown> = {}): Record<string, unknow
     technical:
       `FK damaged_rental_note_rental_fkey is NOT VALID; 3 orphans. Scanned ` +
       `via ${REAL.dsn} with ${REAL.token}.`,
+    // N50 gave every finding one, so this pack now has one more field of
+    // rule-written prose to redact — which is the subject of this file. The
+    // planted secrets go in here too, for the same reason they are in the two
+    // above: a redactor that misses a field is caught by that field carrying
+    // something that must never leave.
+    boundary:
+      `Counted one constraint on ${REAL.person}'s table; nothing else was ` +
+      `examined, and ${REAL.email} appears in none of the rows counted.`,
     evidence: {
       sql: `SELECT count(*) FROM damaged_rental_note WHERE email <> '${REAL.email}'`,
       rowCount: 3,

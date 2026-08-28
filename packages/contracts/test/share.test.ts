@@ -33,7 +33,6 @@ describe('saying how big a count is', () => {
     // The report a real person read as "chỉ có vài bảng trống". 18 and 36 were
     // both on the page; `half` was the fact they were there to convey.
     assert.equal(shareInWords(18, 36, 'en'), 'half');
-    assert.equal(shareInWords(18, 36, 'vi'), 'một nửa');
   });
 
   it('uses a fraction only when the fraction is exact', () => {
@@ -114,8 +113,10 @@ describe('saying how big a count is', () => {
 
     // The percentage fallback is the one form that IS identical everywhere,
     // and deliberately: it is a numeral, and numerals are interpolated into
-    // sentences rather than translated.
-    assert.equal(shareInWords(53, 100, 'en'), shareInWords(53, 100, 'vi'));
+    // sentences rather than translated. Asserted across two languages until
+    // 2026-08-27; with one language the claim is unfalsifiable here and the
+    // reasoning is kept as the note a second language would restore it from.
+    assert.match(shareInWords(53, 100, 'en') ?? '', /53/);
   });
 });
 

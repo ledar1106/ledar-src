@@ -35,16 +35,43 @@
  *
  * `Catalog` is `Record<MessageKey, …>` over a closed union, so a language file
  * missing a key does not compile. The alternative — falling back to English at
- * runtime — produces a report that is Vietnamese except for the three
- * sentences nobody remembered, which is worse than an English report because
- * the reader stops trusting the parts they can read.
+ * runtime — produces a report that is one language except for the three
+ * sentences nobody remembered, which is worse than a single-language report
+ * because the reader stops trusting the parts they can read.
+ *
+ * ## One language, 2026-08-27 — Licensor's decision
+ *
+ * `vi.ts` existed and was complete: 167 keys, with a test refusing any key that
+ * came back identical to its English twin. It was removed, and the reason is
+ * not that it had gone wrong. Every new message key was costing a Vietnamese
+ * sentence as well as an English one, and the product is sold in English.
+ *
+ * ⚠️ It burned no measurement, and that is worth writing down because it looks
+ * like it should have: VS-7 — the only test this product has ever run with
+ * real readers — was read in Vietnamese, but on a HAND translation made for
+ * that round, never through this catalogue. `vi.ts` was written afterwards, in
+ * response. Debt N46 is where the hand translation's disappearance is
+ * recorded.
+ *
+ * 🟩 The seam is deliberately still here. `Lang` is threaded through twenty
+ * three source files and recorded on every run, and none of that was removed:
+ * a report is evidence, and evidence has to say what language it was written
+ * in even when there is only one to choose. Bringing a language back is adding
+ * a file and a name to `LANGS`, exactly as before.
  */
 
 import { EN } from './messages/en.js';
-import { VI } from './messages/vi.js';
 
-/** Languages this product can speak. Adding one is adding a file. */
-export const LANGS = ['en', 'vi'] as const;
+/**
+ * Languages this product can speak. Adding one is adding a file.
+ *
+ * ⚠️ This is what the product RENDERS. It is not what a history file may
+ * CONTAIN — runs recorded before 2026-08-27 can carry `vi`, and the store's
+ * `lang` column still admits it. See `vocabulary.test.ts`: those two sets were
+ * compared for equality until this list shrank, and equality was the wrong
+ * relation the moment one of them could.
+ */
+export const LANGS = ['en'] as const;
 export type Lang = (typeof LANGS)[number];
 
 export function isLang(value: string): value is Lang {
@@ -58,6 +85,13 @@ export function isLang(value: string): value is Lang {
  * operator, because a report is evidence about someone's database and the
  * person who has to read it later may not be the person who ran it. Choosing
  * is explicit.
+ *
+ * ⚠️ Since 2026-08-27 English is also the only choice, so `LEDAR_LANG=vi`
+ * lands in the same branch as `LEDAR_LANG=klingon` and renders English. That
+ * is deliberately NOT special-cased: a function that returns a language has
+ * nowhere to put a warning, and inventing one channel for one retired value
+ * would outlive the reason it was added. Where a person finds out is the
+ * ledger and the `LANGS` comment above.
  */
 export function langFromEnv(env: Record<string, string | undefined>): Lang {
   const named = env['LEDAR_LANG']?.trim().toLowerCase();
@@ -268,6 +302,18 @@ export type MessageKey =
   | 'layer-a.bound.one-index'
   | 'layer-a.bound.all-indexes'
   | 'layer-a.bound.index-tail'
+  // Boundaries for findings that DO raise something — debt N50. A count with
+  // no boundary reads as "and this is the whole of it", which is the same
+  // mistake as a negative with no boundary, pointed the other way.
+  | 'layer-a.bound.fk-orphans'
+  | 'layer-a.bound.check-violations'
+  | 'layer-a.bound.index-state'
+  // A clause, not a sentence: appended to the two counting boundaries when a
+  // count stopped at its ceiling, and empty when nothing was cut. Separate so
+  // a translator keeps one short phrase in step rather than two long ones.
+  | 'layer-a.bound.ceiling'
+  | 'layer-b.bound.counted'
+  | 'layer-b.bound.sampled'
   // ---- Layer B ----
   | 'layer-b.counted'
   | 'layer-b.sampled'
@@ -289,15 +335,23 @@ export type Catalog = Record<MessageKey, (p: Params) => string>;
 /**
  * A number as the reader's locale writes it.
  *
- * Vietnamese groups with `.` and English with `,`, and a report that says
- * "45,822,187" to a Vietnamese reader is asking them to parse a decimal point
- * in the wrong place. Kept here so no call site has to remember.
+ * Different languages group digits differently — a report that says
+ * "45,822,187" to a reader whose language uses `.` as the separator is asking
+ * them to parse a decimal point in the wrong place. Kept here so no call site
+ * has to remember.
+ *
+ * A `Record<Lang, …>` rather than the ternary on `'vi'` that stood here until
+ * 2026-08-27, and the difference is not tidiness: adding a language to `LANGS`
+ * now fails to COMPILE until somebody has said which locale groups its
+ * numbers. A ternary would have gone on quietly answering `en-US` for it.
  */
+const LOCALES: Record<Lang, string> = { en: 'en-US' };
+
 export function num(n: number, lang: Lang): string {
-  return n.toLocaleString(lang === 'vi' ? 'vi-VN' : 'en-US');
+  return n.toLocaleString(LOCALES[lang]);
 }
 
-const CATALOGS: Record<Lang, Catalog> = { en: EN, vi: VI };
+const CATALOGS: Record<Lang, Catalog> = { en: EN };
 
 /**
  * One sentence, in one language.

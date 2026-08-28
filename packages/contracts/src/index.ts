@@ -16,3 +16,6 @@ export * from './i18n.js';
 export * from './evidence-pack.js';
 export * from './scan-shapes.js';
 export * from './missing-policy.js';
+export * from './project-profile.js';
+export * from './profile-observe.js';
+export * from './scan-plan.js';

@@ -22,7 +22,6 @@ import { describe, it } from 'node:test';
 import { LANGS, isLang, langFromEnv, num, t, translator } from '../src/i18n.js';
 import type { MessageKey, Params } from '../src/i18n.js';
 import { EN } from '../src/messages/en.js';
-import { VI } from '../src/messages/vi.js';
 
 /**
  * Arguments broad enough that every message renders.
@@ -102,15 +101,31 @@ const EVERY_PARAM: Params = {
 const KEYS = Object.keys(EN) as MessageKey[];
 
 describe('the message catalogues', () => {
-  it('covers every key in both languages', () => {
-    // Belt and braces over the compiler. `Catalog` already forces this, but a
-    // future `Partial<Catalog>` or an `as Catalog` would quietly remove the
-    // guarantee, and this is the assertion that would notice.
-    assert.deepEqual(
-      Object.keys(EN).sort(),
-      Object.keys(VI).sort(),
-      'the two catalogues do not carry the same keys',
-    );
+  // 🟥 FOUR TESTS STOOD IN THIS BLOCK UNTIL 2026-08-27 and went with `vi.ts`.
+  // Named, not deleted quietly — three of them were the reason this file
+  // exists, and what they watched is now unwatched:
+  //
+  //   'covers every key in both languages'
+  //       Belt and braces over `Catalog`. The compiler half still holds for
+  //       whatever languages exist, so this lost the least.
+  //   'never leaves an English sentence in the Vietnamese catalogue'
+  //       The one this file was written for: a key pasted from en.ts into
+  //       vi.ts compiles, passes everything else, and ships a report that is
+  //       translated apart from one paragraph.
+  //   'does not leave English function words in Vietnamese prose'
+  //       The half-translated message — an English clause inside a translated
+  //       sentence. Coarser, and caught a different mistake.
+  //   'groups numbers the way each language reads them'
+  //       Replaced rather than lost: `num` now reads a `Record<Lang, string>`,
+  //       so a language added without a locale fails to COMPILE, which is
+  //       stronger than the assertion was.
+  //
+  // ⚠️ A second language must not arrive without the first three arriving with
+  // it. They are cheap, they are written down here, and the fault they catch —
+  // a report that is one language except for the parts nobody remembered — is
+  // the one `i18n.ts` calls worse than not translating at all.
+
+  it('has the keys the compiler was told it has, and enough of them', () => {
     assert.ok(KEYS.length > 60, `only ${KEYS.length} messages — did a merge drop some?`);
   });
 
@@ -124,63 +139,8 @@ describe('the message catalogues', () => {
     }
   });
 
-  it('never leaves an English sentence in the Vietnamese catalogue', () => {
-    // The failure this file exists for. A key pasted from en.ts into vi.ts
-    // compiles, passes every other assertion here, and ships a report that is
-    // Vietnamese apart from one paragraph.
-    const untranslated = KEYS.filter(
-      (key) => t('vi', key, EVERY_PARAM) === t('en', key, EVERY_PARAM),
-    );
-
-    assert.deepEqual(
-      untranslated,
-      [],
-      `these messages read identically in both languages, which means they ` +
-        `were never translated:\n  ${untranslated.join('\n  ')}\n\n` +
-        `If a message genuinely must be identical — a bare identifier, say — ` +
-        `it does not belong in the catalogue at all; interpolate it into a ` +
-        `message that does.`,
-    );
-  });
-
-  it('does not leave English function words in Vietnamese prose', () => {
-    // Coarser than the check above and catches a different mistake: a message
-    // translated halfway, with an English clause left inside a Vietnamese
-    // sentence. Deliberately a short list of words that cannot appear in a
-    // Postgres identifier, so table and column names passed in as parameters
-    // do not trip it.
-    const ENGLISH_ONLY = [
-      ' the ',
-      ' that ',
-      ' which ',
-      ' would ',
-      ' cannot ',
-      ' nothing ',
-      ' because ',
-      ' whether ',
-    ];
-
-    const offenders: string[] = [];
-    for (const key of KEYS) {
-      const said = ` ${t('vi', key, EVERY_PARAM).toLowerCase()} `;
-      for (const word of ENGLISH_ONLY) {
-        if (said.includes(word)) offenders.push(`${key} contains "${word.trim()}"`);
-      }
-    }
-
-    assert.deepEqual(
-      offenders,
-      [],
-      `English clauses survive inside Vietnamese messages:\n  ` +
-        `${offenders.join('\n  ')}`,
-    );
-  });
-
-  it('groups numbers the way each language reads them', () => {
-    // 45,822,187 shown to a Vietnamese reader asks them to parse a decimal
-    // point in the wrong place.
+  it('groups numbers the way this language reads them', () => {
     assert.equal(num(45822187, 'en'), '45,822,187');
-    assert.equal(num(45822187, 'vi'), '45.822.187');
   });
 });
 
@@ -195,13 +155,24 @@ describe('choosing a language', () => {
   });
 
   it('takes the language it was given', () => {
-    assert.equal(langFromEnv({ LEDAR_LANG: 'vi' }), 'vi');
-    assert.equal(langFromEnv({ LEDAR_LANG: ' VI ' }), 'vi');
+    assert.equal(langFromEnv({ LEDAR_LANG: 'en' }), 'en');
+    assert.equal(langFromEnv({ LEDAR_LANG: ' EN ' }), 'en');
+  });
+
+  it('🟥 a language that was removed lands where any unknown one lands', () => {
+    // `LEDAR_LANG=vi` worked until 2026-08-27 and is in shell profiles and in
+    // old runbooks. It renders English now, silently, exactly as `klingon`
+    // does — and that is the decided behaviour rather than an oversight: a
+    // function returning a `Lang` has nowhere to put a warning, and one
+    // channel invented for one retired value outlives its reason.
+    //
+    // Pinned so the silence is a choice somebody made and can find, not a gap.
+    assert.equal(langFromEnv({ LEDAR_LANG: 'vi' }), 'en');
   });
 
   it('knows which strings name a language', () => {
     assert.ok(isLang('en'));
-    assert.ok(isLang('vi'));
+    assert.ok(!isLang('vi'), 'vi was removed 2026-08-27 and must not name a language');
     assert.ok(!isLang('en-GB'));
   });
 
@@ -209,7 +180,7 @@ describe('choosing a language', () => {
     // Returning the key would put `scan.cost` on the page where a sentence
     // belongs, and a report that shipped saying `scan.cost` is a report a test
     // only catches if it happens to read that line.
-    const T = translator('vi');
+    const T = translator('en');
     assert.throws(
       () => T('scan.definitely-not-a-key' as MessageKey),
       /No message for/,

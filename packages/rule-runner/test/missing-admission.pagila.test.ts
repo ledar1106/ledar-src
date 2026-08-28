@@ -262,7 +262,7 @@ const PROMISE = {
  * blank clause. It does not catch a rephrase into a synonym. The half that
  * measures behaviour is the probe run, and that one is not a word check.
  */
-const BLANK_IN_WORDS: Record<Lang, string> = { en: 'blank spaces', vi: 'dấu cách' };
+const BLANK_IN_WORDS: Record<Lang, string> = { en: 'blank spaces' };
 
 /**
  * The words each rewritten sentence had to gain when its group widened.
@@ -275,7 +275,6 @@ const BLANK_IN_WORDS: Record<Lang, string> = { en: 'blank spaces', vi: 'dấu c�
  */
 const WIDENED_IN_WORDS: Record<Lang, { scalar: string; structured: string }> = {
   en: { scalar: 'choice', structured: 'range' },
-  vi: { scalar: 'lựa chọn', structured: 'khoảng' },
 };
 
 /**
@@ -303,17 +302,17 @@ const SENTENCE_MUST_NAME: readonly {
   {
     what: 'an enum',
     member: (t) => t.typtype === 'e',
-    words: { en: 'choice', vi: 'lựa chọn' },
+    words: { en: 'choice' },
   },
   {
     what: 'a range or multirange',
     member: (t) => t.typtype === 'r' || t.typtype === 'm',
-    words: { en: 'range', vi: 'khoảng' },
+    words: { en: 'range' },
   },
   {
     what: 'an array',
     member: (t) => t.typtype === 'b' && t.isArray,
-    words: { en: 'list', vi: 'danh sách' },
+    words: { en: 'list' },
   },
 ];
 
@@ -519,11 +518,11 @@ if (!gate.ok) {
           );
           seen.set(said, admission);
         }
-        assert.notEqual(
-          missingMeaningSentence('text', 'en'),
-          missingMeaningSentence('text', 'vi'),
-          'the two languages carry the same bytes, so one was never translated',
-        );
+        // 🟥 An assertion stood here until 2026-08-27 checking that the two
+        // languages did not carry the same bytes — i.e. that this sentence had
+        // actually been translated. It went with `vi.ts`. With one language
+        // there is nothing to compare, and comparing English to itself would
+        // be green for a reason unrelated to the subject (§4.3).
       }
     });
 
@@ -754,13 +753,19 @@ if (!gate.ok) {
       // 🟥 This asserted `=== 0` until 2026-08-27, and CI proved it wrong the
       // first time it ran: the public workflow builds Pagila on
       // `pgvector/pgvector:pg18`, which ships `vector`, `halfvec` and
-      // `sparsevec`. The local fixture is `postgres:18-alpine` and carries
+      // `sparsevec`. The local fixture was `postgres:18-alpine` and carried
       // none, so the claim held here and failed there — debt N9 exactly, a
       // thing measured on ONE environment.
       //
       // Asserting the absence of examples was the weaker test anyway. It now
       // CLASSIFIES whatever the server happens to carry: true on both
       // fixtures, and stronger on the one that carries more.
+      //
+      // The two benches are the same image since 2026-08-27 (N47), so this
+      // loop now runs over three real types locally instead of zero. That
+      // closes the gap that let the break through; it does not make the
+      // classification form redundant — the next divergence will be some
+      // other thing CI has and this machine does not.
       const extensionCandidates = types.filter(
         (t) => t.typtype === 'b' && !t.isArray && t.schema !== 'pg_catalog',
       );
@@ -982,10 +987,15 @@ if (!gate.ok) {
     it('an extension type nobody decided is refused; citext is the one that is not', async () => {
       // 🟥 This asserted `=== 0` and CI disagreed on its first run: the public
       // fixture is built on `pgvector/pgvector:pg18` and owns six extension
-      // types, while the local one is plain `postgres:18-alpine`. The count is
+      // types, while the local one was plain `postgres:18-alpine`. The count is
       // still read — a reader should know whether this ran against live
       // examples — but it is no longer a claim about how many a server may
       // have. The classification itself is asserted in the catalog sweep.
+      //
+      // Both fixtures are `pgvector/pgvector:pg18` since 2026-08-27 (debt N47),
+      // so this now measures six on either bench. The count stays un-asserted
+      // anyway: making it a constant again would re-create, on a new number,
+      // exactly the claim that broke — one true only where it was written.
       const extensionTypes = await countOf(`
         SELECT count(*)::int AS n
         FROM pg_catalog.pg_depend d

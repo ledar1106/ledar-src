@@ -527,6 +527,41 @@ export const EN: Catalog = {
     're-checked. Nothing here says anything about rules that were never ' +
     'declared — that is a different question, and a harder one. Indexes are ' +
     'counted separately.',
+  // ---- boundaries for findings that DO raise something (debt N50) ---------
+  //
+  // A raised finding needs these for the mirror-image of the reason a negative
+  // does. A negative without a boundary reads as "there is nothing to find";
+  // a count without one reads as "and this is the whole of it". Each says what
+  // was measured and then, deliberately, what the number is NOT about.
+  'layer-a.bound.fk-orphans': (p) =>
+    `Counted every row of ${s(p, 'table')} whose reference has no match in ` +
+    `${s(p, 'parent')}${s(p, 'ceiling')}. That is one constraint: rows missing ` +
+    `from ${s(p, 'table')} altogether are not in this number, references the ` +
+    `database has already validated were not re-counted, and nothing here ` +
+    `covers links nobody ever declared.`,
+  'layer-a.bound.ceiling': (p) =>
+    `, stopping at ${s(p, 'limit')} — there may be more`,
+  'layer-a.bound.check-violations': (p) =>
+    `Counted the rows in ${s(p, 'table')} that this one rule rejects` +
+    `${s(p, 'ceiling')}. Only rows this account can read are in that count, ` +
+    `and only this rule: a row can satisfy it and still be wrong about ` +
+    `something the database was never told to check.`,
+  'layer-a.bound.index-state': (p) =>
+    `Read from the catalog — ${s(p, 'table')} was not queried, so this says ` +
+    `what the index is not doing, not what has happened while it was not ` +
+    `doing it. How many rows went in meanwhile is a different question, and ` +
+    `one nothing here asked.`,
+  'layer-b.bound.counted': (p) =>
+    `Counted every row of ${s(p, 'table')}, so the number is exact — but what ` +
+    `it MEANS is a guess. The database was never told ${s(p, 'column')} ` +
+    `points at ${s(p, 'parent')}; that is read out of the name and the values, ` +
+    `and it has not been confirmed by anyone.`,
+  'layer-b.bound.sampled': (p) =>
+    `Drawn from ${s(p, 'present')} rows spread across ${s(p, 'table')}, not ` +
+    `the whole of it, so the rest is uncounted. And what the column MEANS is ` +
+    `a guess either way: the database was never told ${s(p, 'column')} points ` +
+    `at ${s(p, 'parent')}, so nothing here is confirmed.`,
+
   'layer-a.bound.no-indexes': (p) =>
     `There were no indexes visible to this account in ${s(p, 'where')}, so ` +
     `none were checked.`,

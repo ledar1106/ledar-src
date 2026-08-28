@@ -139,62 +139,195 @@ export const en = {
     'The window could not reach the part of the app that talks to your database. Nothing ran, and nothing was read.',
   'scan.again': 'Scan again',
 
-  // S3 — one question, and the reason it is one is in interview.ts.
+  // S3 — the five questions, ideal §14-§18.
+  //
+  // 🟥 Everything here replaced a single free-text question on 2026-08-27.
+  // `interview.ts` holds the account of what that reading of VS-6 cost. The
+  // rule these strings live under: every question is answerable by LOOKING at
+  // a screen, never by understanding a schema. The six that came before asked
+  // things like "what does a customer expect after an ORDER", and two of six
+  // were unanswerable for the first real person because both assumed they
+  // sell things.
   //
   // The skip is worded as an instruction to the product, never as an
   // admission by the person. The ideal's §13 audit is explicit about why:
   // this is somebody who already feels behind on their own system, and a
-  // button that makes them say "I don't know" to use it charges them for
-  // the privilege of being helped.
+  // button that makes them say "I don't know" to use it charges them for the
+  // privilege of being helped.
   'interview.intro':
-    'There is one thing I cannot work out by reading your database. I can see its shape — what tables exist, what points at what, where values repeat. What I cannot see is what your business needs to be true.',
+    'Five quick questions, and none of them need you to know how anything works — just whether it is there. Skip any of them, or all of them, and I will go and look for myself.',
   'interview.progress': 'Question {n} of {total}',
-  'interview.dont-know': 'Nothing comes to mind — just tell me what you find',
-  'interview.dont-know.said': 'Nothing comes to mind — just tell me what you find.',
-  'interview.answer.placeholder': 'Say it in your own words',
-  'interview.too-long':
-    'That is longer than I can take in as one answer. Say the shorter version — the part you would tell a new colleague first.',
 
-  'interview.rule.text': 'Is there a rule your business depends on that I should check?',
-  'interview.rule.hint':
-    'In your own words. Skipping costs you nothing — I will still report what I find.',
-  // Three examples, one per shape this product can actually check. They are
-  // here to be RECOGNISED rather than composed from nothing: the person this
-  // is built for can tell you their business needs something, and struggles
-  // to phrase it as a rule. Showing the range after the question is asked
-  // also keeps the shapes out of the prompt that produced the answer.
-  'interview.rule.examples': 'Rules of this shape are the ones I can check:',
-  'interview.rule.example.1': 'Every order belongs to a customer who still exists.',
-  'interview.rule.example.2': 'Every member has an email address on file.',
-  'interview.rule.example.3': 'No two members share the same email address.',
+  // The three answers. Peers, in reading order, and the third is not a faded
+  // afterthought — see the note above.
+  'interview.yes': 'Yes',
+  'interview.no': 'No',
+  'interview.dont-know': 'I do not know — go and find out',
+  'interview.skip-all': 'Skip all of this — just go and look',
+  'interview.skip-all.said': 'Skip the rest — go and look.',
+  'interview.confirm': 'That is the lot',
+  'interview.picked.none': 'Yes, but none of those',
+  // Unreachable by clicking; see `applyAnswer`. A sentence rather than a
+  // silent no-op, because the only ways to get here are a bug or a console.
+  'interview.unknown-option':
+    'That is not one of the options I offered, so I have not recorded it. Nothing changed.',
 
-  // The closing turn. It has to survive the reading a tired person gives it,
-  // so it says what happened to the rule sentence in the same breath as what
-  // did NOT happen to it.
-  'interview.done.heading': 'Noted.',
-  'interview.done.kept':
-    'That is held in this window and nowhere else — not written to disk, not sent anywhere, and it changed nothing about the database I read.',
-  'interview.done.rule.heading': 'You wrote:',
-  // 🟥 This line promised the read-back unconditionally until 2026-08-27,
-  // when the first real person to reach this screen wrote "a user's credit
-  // balance must never go below zero" — a rule that needs a NUMBER, which
-  // this product declines rather than approximates. The promise was false
-  // for the very first sentence it was ever shown.
+  // The five questions. Each asks about presence, not about design.
+  'interview.area.auth': 'Does your system log people in?',
+  'interview.area.database': 'Does your system have a database?',
+  'interview.area.payment': 'Does your system take payments?',
+  'interview.area.storage': 'Does your system store files or images?',
+  'interview.area.jobs': 'Does anything run on a schedule, a queue, or in the background?',
+
+  // The follow-up, shown only after a yes. "Which" rather than "what", because
+  // the answer is a recognition from a short list rather than a description.
+  'interview.which.auth': 'Which one? Tick anything that applies.',
+  'interview.which.database': 'Which one? Tick anything that applies.',
+  'interview.which.payment': 'Which one? Tick anything that applies.',
+  'interview.which.storage': 'Which one? Tick anything that applies.',
+  // §18 offers no list. The key exists so the five areas stay symmetrical in
+  // this catalogue and a future list has somewhere to land.
+  'interview.which.jobs': 'Which one? Tick anything that applies.',
+
+  // Option labels. Product names as their makers write them — this is the one
+  // place in the catalogue where matching somebody else's capitalisation
+  // matters more than matching ours, because the person is scanning for a
+  // word they have seen in their own dashboard.
+  'interview.option.supabase_auth': 'Supabase Auth',
+  'interview.option.firebase_auth': 'Firebase Auth',
+  'interview.option.auth0': 'Auth0',
+  'interview.option.clerk': 'Clerk',
+  'interview.option.postgresql': 'PostgreSQL',
+  'interview.option.mysql': 'MySQL',
+  'interview.option.mongodb': 'MongoDB',
+  'interview.option.supabase': 'Supabase',
+  'interview.option.firebase': 'Firebase',
+  'interview.option.sqlite': 'SQLite',
+  'interview.option.redis': 'Redis',
+  'interview.option.stripe': 'Stripe',
+  'interview.option.paypal': 'PayPal',
+  'interview.option.vnpay': 'VNPay',
+  'interview.option.momo': 'MoMo',
+  'interview.option.bank_transfer': 'Bank transfer',
+  'interview.option.supabase_storage': 'Supabase Storage',
+  'interview.option.s3': 'Amazon S3',
+  'interview.option.cloudflare_r2': 'Cloudflare R2',
+  'interview.option.local_disk': 'Files on the server itself',
+  'interview.option.custom': 'Something built in-house',
+  'interview.option.other': 'Something else',
+  'interview.option.dont_know': 'I do not know',
+
+  // The closing turn.
   //
-  // The limit is disclosed here, AFTER the sentence is written, and that
-  // position is deliberate: saying it in the question's hint would teach
-  // people to only ask what the product can already answer, and then nobody
-  // ever learns what they actually needed.
-  // 🟥 Said "is the next build" until this slice. A date is a promise, the
-  // read-back is parked behind an audit (`_doc/26` §0b), and HANDOFF-STATUS
-  // lists removing that promise as work in its own right. What is true is
-  // narrower and is what it says now: this build does not do it.
-  'interview.done.rule.next':
-    'Turning that sentence into a check is not something this build does, and it may turn out I cannot. What I am able to check is narrow: values that must point at something real, must not be missing, or must not repeat. A rule about an amount, about when something happened, or about what a value means to your business is one I will turn down rather than approximate.',
-  'interview.done.rule.then':
-    'Either way you see it before anything runs. If I can check it, I will say back exactly which table and which column I am about to look at, and wait for you to confirm. If I cannot, I will say so and say why. Nothing has run and nothing has been sent.',
-  'interview.done.no-rule':
-    'No rule then, and that costs you nothing here — everything I check by default, I check anyway. A rule only adds one more thing to the list.',
+  // 🟥 It says what has NOT happened as loudly as what has. The version this
+  // replaced promised a read-back screen "in the next build", which was a
+  // date dressed as a feature — and the screen it promised is parked behind
+  // an audit. Nothing here promises anything that does not exist yet.
+  // The interview could not fetch its questions. The report is untouched by
+  // this — it was written before the interview ran — so the sentence says
+  // what was lost and nothing more alarming than that.
+  'interview.unavailable':
+    'I could not load my questions just now. Nothing above is affected — that came from your database, not from me.',
+
+  'interview.done.heading': 'Noted.',
+  // 🟥 The disk claim that used to be here is gone, and its going is the
+  // point. What you say now LEAVES the window: it goes to the part of the app
+  // that did the reading, because that is where the two halves can be put
+  // side by side. A window cannot see what the other side does with it, so it
+  // may not go on promising on the other side's behalf — §4.1b, a sentence on
+  // screen that no measurement produced. What it can still vouch for is that
+  // nothing leaves the machine, which is hard rule ⑥ and a property of the
+  // product rather than of this call.
+  'interview.done.kept':
+    'You answered {n} of them. None of it leaves this machine, and none of it changed anything about the database I read.',
+  'interview.done.nothing-said':
+    'Nothing to record, and nothing lost. Going and looking is the part I am better at anyway.',
+  'interview.done.next':
+    'Now I put that beside what I saw for myself while I was reading.',
+
+  // ---- the map — ideal §22 (the ladder) and §23 (the Project Profile) ----
+  //
+  // The screen ideal §12's audit asked for, in its own words: *scan first,
+  // show what was found, and let them press yes*. Every sentence below is
+  // written so that a person who does not understand a backend can judge it
+  // by RECOGNISING something, never by knowing something.
+  //
+  // Two admissions are load-bearing and `apps/desktop/test/i18n.test.ts`
+  // pins them: `profile.method` (this was built from names, not from data)
+  // and `profile.no-path` (a yes can be recorded here, a no cannot yet).
+  // They are what answers `_doc/25`'s two questions for this screen —
+  // *where have I not looked* and *where do I not know*.
+  'profile.intro':
+    'That is the map. For each area it says how I know what I know — whether you told me, whether I saw it myself, or whether nobody has said and nothing has shown.',
+  'profile.conflicts.heading': 'WHERE WHAT YOU TOLD ME AND WHAT I SAW DO NOT MEET',
+  'profile.areas.heading': 'AREA BY AREA',
+
+  // The areas as things rather than as questions. `interview.area.*` asks;
+  // these name. The same word twice would make one of the two wrong: a
+  // heading that reads "Does your system log people in?" above a card that
+  // has already answered it is the product asking after it knows.
+  'profile.area.auth': 'Logging people in',
+  'profile.area.database': 'A database',
+  'profile.area.payment': 'Taking payments',
+  'profile.area.storage': 'Storing files or images',
+  'profile.area.jobs': 'Work that runs on its own',
+
+  // The rung, named on the card. `_doc/25` 3.3 ① — meaning never lives in
+  // colour alone, so every rung says out loud which one it is.
+  'profile.state.unknown': 'NOTHING SAID, NOTHING SEEN',
+  'profile.state.stated': 'YOU TOLD ME',
+  'profile.state.suspected': 'I MAY HAVE SEEN THIS',
+  'profile.state.observed': 'I SAW THIS',
+  'profile.state.verified': 'YOU CONFIRMED THIS',
+
+  'profile.state.unknown.body':
+    'Nobody has said, and nothing I read pointed at it. That is where every area starts, and it is a gap in what I know rather than one in your system.',
+  'profile.state.stated.body':
+    'Nothing in what I was able to read pointed at this either way, so your answer is all I have on it.',
+  // Must read as a question and never as news — hard rule ③, and the whole
+  // reason `suspected` is a rung of its own rather than a weaker `observed`.
+  'profile.state.suspected.body':
+    'I saw something that could mean this and could just as easily mean something else. Is this right?',
+  'profile.state.observed.body':
+    'I saw this for myself while I was reading. Here is where, and what made me read it that way.',
+  'profile.state.verified.body':
+    'You looked at what I found and said it was right. This is the only thing on this map that is settled.',
+
+  // What they said, kept beside what was seen so the two can be compared.
+  'profile.said.yes': 'You said: yes.',
+  'profile.said.no': 'You said: no.',
+  'profile.said.dont_know': 'You said you did not know, and asked me to find out.',
+
+  'profile.evidence.heading': 'Where I saw it',
+  'profile.confirm': 'Yes, that is right',
+  'profile.confirm.failed':
+    'I could not record that just now, so nothing changed. The button is back if you want to try again.',
+  'announce.profile': 'The map is ready.',
+  'announce.profile.confirmed': '{area} is now settled.',
+
+  // 🟥 The two directions of a disagreement, and they are not phrased alike.
+  //
+  // One is about their system and is the most valuable thing the map holds.
+  // The other is about the edge of what this product can see, and the day it
+  // reads as an accusation is the day the product has mistaken the edge of
+  // its own vision for the edge of the world (`conflictsIn`, contracts).
+  'profile.conflict.said_no_found_yes.headline': 'You said no. I found it anyway.',
+  'profile.conflict.said_no_found_yes.body':
+    'This is the one thing here you could not have asked me about, because you did not know it was there. Nothing about it says anything is broken — it says your system has a part in it that was not on your list.',
+  'profile.conflict.said_yes_found_no.headline': 'You said yes. I could not see it.',
+  'profile.conflict.said_yes_found_no.body':
+    'That is about how far I can see, not about whether you are right. I read one database and nothing else, so anything that lives outside it is invisible to me. Take this as my gap and not your mistake.',
+
+  // §24 — a profile is meant to be edited, and a version is what makes an
+  // edit something a person can date and order.
+  'profile.version':
+    'This map is version {n}. It is not the last word: it changes when you confirm something, and again the next time I read.',
+  'profile.method':
+    'I built this from the names of the schemas, tables and columns your role let me see. I did not read a single row of your data to do it — and a name is not proof, which is why anything I am unsure of is asked rather than announced.',
+  'profile.no-path':
+    'If I have something wrong here, I have nowhere to put that yet. I can record that you agreed; I cannot yet record that you did not.',
+  'profile.unavailable':
+    'I could not put what you told me beside what I saw. Nothing above is affected — the report came from your database before any of this ran.',
 
   'next.enforced':
     'That answer holds until the database itself changes; connecting again at any time re-proves it.',

@@ -1,129 +1,66 @@
 /**
- * S3 — the six-question business interview, as state rather than screens.
+ * S3 — the fixed question set, as state rather than screens.
  *
- * No DOM in this file. The window renders it; a test drives the whole
- * conversation without a window, which is the only way the assertions below
- * about WHICH answer is the rule can be made at all.
+ * Ideal §13–§18. Five areas, `Yes / No / Don't know`, and a short list to
+ * recognise after a `yes`. The set is the same for everyone on purpose: a
+ * thousand people answering the same five questions is a MAP, and a thousand
+ * people each writing a sentence is a thousand sentences nobody can join up.
  *
- * ## 🟥 Why `isRule` is a flag on the question and not an index
+ * ## 🟥 What stood here before, and why it went — 2026-08-27
  *
- * The audited demo shipped this bug twice in one day (`_doc/25` audit block,
- * AGENTS §4.20):
- *
- * ```text
- * P0        a fixed rule was labelled "Your rule" whatever the user typed
- * P0 again  the first patch anchored the rule to the END of the interview,
- *           so it quoted QUESTION SIX back as "your rule"
- * ```
- *
- * Both are the same mistake: deriving *which sentence is the rule* from
- * something that merely correlates with it — a constant, or a position in
- * time. The rule is a property of one question, so it is stored on that
- * question, and `ruleSentence` reads the flag. Moving the rule question, or
- * adding a seventh, cannot silently re-point it.
- *
- * ## "I don't know" is an answer, and it is NOT a rule
- *
- * `_doc/25` S3 makes the button peer-level with the input on purpose: not
- * knowing is a legitimate answer and the product goes and finds out. So it is
- * recorded as its own kind — never as an empty string, which would be
- * indistinguishable from a question nobody answered.
- *
- * The consequence that matters is at question five: "I don't know" there means
- * **there is no rule**. `ruleSentence` returns null, and nothing downstream is
- * allowed to invent one to fill the gap.
- */
-
-/**
- * 🟥 This was six questions until 2026-08-27, and the first real person to
- * answer them is why it is one.
+ * One free-text question: *"Is there a rule your business depends on that I
+ * should check?"* — with a model waiting downstream to turn the answer into a
+ * runnable check. That was never what VS-6 asked for. Reading it that way cost:
  *
  * ```text
- * asked                                        answered?
- * what does a customer expect after an ORDER   no — "I don't know"
- * which records would confuse you if gone      yes
- * what must be true before an ORDER is done    no — "i don`t no"
- * which part worries you most                  yes — "latency and speed"
- * describe one rule                            yes
- * who should decide                            yes
+ * · a prompt-injection test rig built for a text box that should not exist,
+ *   which then measured 7 breaches in 72 shots
+ * · a "0-1/5 of cold questions land in a checkable shape" measurement, which
+ *   was measuring the wrong thing entirely — "do you use Stripe?" is
+ *   answerable 5 times out of 5
+ * · the slice parked on the strength of that number
+ * · an interview cut from six questions to one, which threw away the only
+ *   substantive answer the first real person gave ("latency and speed")
  * ```
  *
- * The two that failed are the only two that assumed the person sells things.
- * The database they had connected has no orders in it, so those questions had
- * no true answer available — the product was not asking something hard, it
- * was asking something unanswerable.
+ * The six it replaced were not the ideal's either. They asked for KNOWLEDGE —
+ * *"what does a customer expect after an ORDER"* — and two of six were
+ * unanswerable for the first real person because both assumed they sell
+ * things. The questions here ask for RECOGNITION. Nobody has to understand a
+ * backend to say whether their system logs people in.
  *
- * And "which part worries you most" got a real answer — latency — that this
- * product cannot look at at all. Asking a question whose answer you have to
- * throw away is its own kind of dishonesty.
+ * ## No model touches this path
  *
- * ## Why the rest went rather than being rewritten
+ * Not a mitigation, an absence. There is no free text, so there is nothing to
+ * inject into and nothing to misread. The answers are three enum values and a
+ * set of option ids that came from the contract in the first place.
  *
- * The audit block over §12 of the ideal is the heaviest finding in its
- * onboarding section, and it is exactly this:
+ * ## Where the question set comes from
  *
- * > You are asking people the very thing that, by your own definition of who
- * > this is for, they do not know. Reverse the order: scan first, show what
- * > was found, and let them confirm. The old question demands KNOWLEDGE; the
- * > new one only asks them to RECOGNISE something already on the screen.
- *
- * Sorted by who can actually answer, most of the six were asking for things
- * the scan reads off the database minutes later — table names, sizes, what
- * points at what. Those belong after a scan, phrased as confirmation, and
- * this shell has no scan screen yet. So they are not here at all rather than
- * here in a worse form.
- *
- * What is left is the one thing no amount of reading a schema produces: a
- * sentence about what the business needs to be true. That is VS-6's whole
- * input, and it is the only question this slice can both ask honestly and
- * use.
- *
- * ⚠️ `_doc/25` S3 still describes six. The correction block at the end of
- * that file records this decision and its evidence; the contract has not been
- * rewritten out from under anyone.
+ * `window.ledar.interviewForm()`, built from `@ledar/contracts` on the main
+ * side. This file holds no list of areas — see `main/interview-form.ts` for
+ * why the round trip is cheaper than the copy it avoids.
  */
-export type QuestionId = 'rule';
 
-export type InterviewQuestion = {
-  readonly id: QuestionId;
-  /** Whether the answer to THIS question is the rule the product may check. */
-  readonly isRule: boolean;
-};
-
-export const INTERVIEW_QUESTIONS: readonly InterviewQuestion[] = [
-  { id: 'rule', isRule: true },
-];
+import type { AreaReply, InterviewForm, InterviewQuestion } from '../shared/ipc.js';
 
 /**
- * A free-text answer longer than this is not a sentence about a business.
+ * What a person has said about one area, before it is sent anywhere.
  *
- * ⚠️ This is a bound on what the window accumulates, NOT the gate that
- * matters. The gate that matters stands where this text meets a prompt, and
- * that door is not in this slice — it is the subject of `_doc/26`. Counting
- * this as a defence against prompt stuffing would be counting a fence that
- * stands in a different field.
+ * `null` is "not answered yet" and is different from `dont_know`, which is a
+ * real answer somebody gave. Collapsing the two would make an interview a
+ * person walked away from indistinguishable from one they finished by saying
+ * they did not know — and those mean opposite things to whoever reads the
+ * profile later.
  */
-export const MAX_ANSWER_LENGTH = 2000;
-
-export type Answer =
-  | { readonly kind: 'typed'; readonly text: string }
-  | { readonly kind: 'dont-know' };
+export type Reply = AreaReply | null;
 
 export type Interview = {
-  /**
-   * The questions THIS interview is asking.
-   *
-   * Carried on the interview rather than read from the module constant so
-   * that the flag discipline stays testable after the shipped list shrank to
-   * one question. With a single question, "the rule comes from the flagged
-   * question and not from the last one answered" is a claim no test can put
-   * under strain — and that claim is the one this product got wrong twice.
-   * A test builds its own list of several questions and proves it there.
-   */
+  /** The questions THIS interview is asking, as the main side sent them. */
   readonly questions: readonly InterviewQuestion[];
   /** Which question is being asked. Equal to the count when finished. */
   readonly index: number;
-  readonly answers: readonly (Answer | null)[];
+  readonly replies: readonly Reply[];
 };
 
 /**
@@ -133,54 +70,86 @@ export type Interview = {
  */
 export type AnswerResult =
   | { readonly ok: true; readonly interview: Interview }
-  | { readonly ok: false; readonly reason: 'empty' | 'too-long' | 'finished' };
+  | { readonly ok: false; readonly reason: 'finished' | 'unknown-option' };
 
-export function startInterview(
-  questions: readonly InterviewQuestion[] = INTERVIEW_QUESTIONS,
-): Interview {
-  return { questions, index: 0, answers: questions.map(() => null) };
-}
-
-export function isFinished(interview: Interview): boolean {
-  return interview.index >= interview.questions.length;
+export function startInterview(form: InterviewForm): Interview {
+  return {
+    questions: form.questions,
+    index: 0,
+    replies: form.questions.map(() => null),
+  };
 }
 
 export function currentQuestion(interview: Interview): InterviewQuestion | null {
   return interview.questions[interview.index] ?? null;
 }
 
-function record(interview: Interview, answer: Answer): Interview {
-  const answers = interview.answers.slice();
-  answers[interview.index] = answer;
-  return { questions: interview.questions, index: interview.index + 1, answers };
-}
-
-export function answerTyped(interview: Interview, raw: string): AnswerResult {
-  if (isFinished(interview)) return { ok: false, reason: 'finished' };
-  const text = raw.trim();
-  if (text === '') return { ok: false, reason: 'empty' };
-  if (text.length > MAX_ANSWER_LENGTH) return { ok: false, reason: 'too-long' };
-  return { ok: true, interview: record(interview, { kind: 'typed', text }) };
-}
-
-export function answerDontKnow(interview: Interview): AnswerResult {
-  if (isFinished(interview)) return { ok: false, reason: 'finished' };
-  return { ok: true, interview: record(interview, { kind: 'dont-know' }) };
+export function isFinished(interview: Interview): boolean {
+  return interview.index >= interview.questions.length;
 }
 
 /**
- * The sentence the user wrote as their rule, or null when there is none.
+ * Records an answer and moves on.
  *
- * Null has two causes and they are deliberately not distinguished here: the
- * question was answered "I don't know", or it has not been reached yet.
- * Either way there is no rule, and every caller of this function is asking
- * the same question — *do I have a sentence to read back?* A caller that
- * needs to tell those apart is asking about the INTERVIEW, and should read
- * `answers` directly.
+ * ⚠️ `picked` is checked against the options the MAIN side sent, not against
+ * a list here. An id the form never offered is refused rather than passed on:
+ * the renderer is where a person clicks, and a value arriving from it that
+ * the contract never named is either a bug or somebody at a console — and
+ * both deserve the same answer.
+ *
+ * ⚠️ `picked` is emptied for anything but `yes`. Someone who ticks two boxes
+ * and then changes their answer to "no" must not leave those ticks behind in
+ * the record; a `no` carrying a list of things they use is a contradiction
+ * the profile would have to be read twice to catch.
  */
-export function ruleSentence(interview: Interview): string | null {
-  const at = interview.questions.findIndex((question) => question.isRule);
-  const answer = interview.answers[at];
-  if (answer === undefined || answer === null) return null;
-  return answer.kind === 'typed' ? answer.text : null;
+export function answer(
+  interview: Interview,
+  given: { answer: AreaReply['answer']; picked?: readonly string[] },
+): AnswerResult {
+  const question = currentQuestion(interview);
+  if (question === null) return { ok: false, reason: 'finished' };
+
+  const picked = given.answer === 'yes' ? [...(given.picked ?? [])] : [];
+  for (const id of picked) {
+    if (!question.options.includes(id)) return { ok: false, reason: 'unknown-option' };
+  }
+
+  const replies = [...interview.replies];
+  replies[interview.index] = { area: question.area, answer: given.answer, picked };
+  return { ok: true, interview: { ...interview, index: interview.index + 1, replies } };
+}
+
+/**
+ * The button the ideal expects to be pressed most.
+ *
+ * *"Bỏ qua tất cả — cứ tự tìm đi."* Every unanswered area becomes `dont_know`,
+ * because that is exactly what it means, and the interview ends.
+ *
+ * 🟩 This is not a failure path and the code should not read like one. The
+ * ideal's audit is explicit: for this ICP it will be the most-used button, and
+ * that is normal. A product that only worked for people who answered five
+ * questions about a backend would be a product that does not work for the
+ * people it is for.
+ *
+ * ⚠️ Answers already given are KEPT. Skipping the rest is not retracting what
+ * you already said.
+ */
+export function skipRest(interview: Interview): Interview {
+  const replies = interview.questions.map(
+    (question, i): Reply =>
+      interview.replies[i] ?? { area: question.area, answer: 'dont_know', picked: [] },
+  );
+  return { ...interview, index: interview.questions.length, replies };
+}
+
+/**
+ * Everything the person said, for the main side to turn into `stated` rungs.
+ *
+ * Returns only what was actually answered. An interview abandoned halfway
+ * yields the part that was answered and nothing invented for the rest — the
+ * remaining areas stay `unknown` on the ladder, which is true, rather than
+ * `dont_know`, which would be putting words in somebody's mouth.
+ */
+export function repliesOf(interview: Interview): readonly AreaReply[] {
+  return interview.replies.filter((r): r is AreaReply => r !== null);
 }

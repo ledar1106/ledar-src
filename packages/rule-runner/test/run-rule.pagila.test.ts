@@ -35,7 +35,7 @@ import assert from 'node:assert/strict';
 import { after, describe, it } from 'node:test';
 
 import { QueryBudget } from '@ledar/connector-postgres';
-import { sealRule } from '@ledar/contracts';
+import { LANGS, sealRule } from '@ledar/contracts';
 import type { SchemaCatalog } from '@ledar/contracts';
 import { announceSkip, openPagila } from '@ledar/test-fixtures';
 
@@ -223,7 +223,11 @@ if (!gate.ok) {
       // below `certain` when `userStatus` is `unreviewed`, and `sealFindings`
       // runs it. This asserts the combination actually arises on a live run,
       // which is the half a unit test of the gate cannot show.
-      for (const lang of ['en', 'vi'] as const) {
+      // Was `['en', 'vi']` until 2026-08-27. `LANGS` rather than a literal now,
+      // so this loop widens by itself the day a language comes back — a literal
+      // list would have to be remembered, and this is exactly the assertion
+      // nobody would think to widen.
+      for (const lang of LANGS) {
         const rule = sealRule(
           {
             expressible: true,

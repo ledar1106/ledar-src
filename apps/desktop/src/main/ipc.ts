@@ -16,18 +16,59 @@
 import { clipboard, ipcMain } from 'electron';
 import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron';
 
+import { AreaAnswer, ProfileArea } from '@ledar/contracts';
+
 import { CHANNELS } from '../shared/ipc.js';
 import type {
+  AreaReply,
   ConnectOutcome,
   DevPrefill,
   GuideBundle,
+  InterviewForm,
+  ProfileFacts,
   ScanOutcome,
   SessionHandle,
 } from '../shared/ipc.js';
 import { guideBundle, runConnectFlow } from './connect-flow.js';
+import { interviewForm } from './interview-form.js';
+import { confirmArea, currentFacts, saveProfile } from './profile-flow.js';
 import { runScanFlow } from './scan-flow.js';
 import { closeSession } from './session.js';
 import { APP_ORIGIN } from './serve.js';
+
+/**
+ * The replies, keeping only what is unmistakably one.
+ *
+ * Uses the contract's own parsers rather than checking strings by hand: an
+ * area or an answer added to `@ledar/contracts` widens what is accepted here
+ * automatically, and a hand-written list would be the third copy of a
+ * vocabulary — §4.27 measured what that costs.
+ *
+ * `picked` is filtered to strings rather than refused outright. The ids are
+ * only ever compared against the option list, so a non-string in there cannot
+ * match anything; dropping it loses nothing and keeps one badly-typed element
+ * from discarding an answer somebody actually gave.
+ */
+function validReplies(payload: unknown): AreaReply[] {
+  if (!Array.isArray(payload)) return [];
+
+  const out: AreaReply[] = [];
+  for (const raw of payload) {
+    if (typeof raw !== 'object' || raw === null) continue;
+    const row = raw as Record<string, unknown>;
+
+    const area = ProfileArea.safeParse(row['area']);
+    const answer = AreaAnswer.safeParse(row['answer']);
+    if (!area.success || !answer.success) continue;
+
+    const picked = Array.isArray(row['picked'])
+      ? row['picked'].filter((v): v is string => typeof v === 'string')
+      : [];
+
+    out.push({ area: area.data, answer: answer.data, picked });
+  }
+  return out;
+}
 
 /** Longest text the copy button will place on the clipboard. */
 const MAX_COPY_LENGTH = 200_000;
@@ -77,6 +118,45 @@ export function registerIpc(opts: {
   ipcMain.handle(CHANNELS.guide, (event): GuideBundle => {
     assertAppWindow(event);
     return guideBundle();
+  });
+
+  // Takes nothing, so there is nothing from the renderer to validate. The
+  // window asks what the questions are; it does not get to say.
+  ipcMain.handle(CHANNELS.interviewForm, (event): InterviewForm => {
+    assertAppWindow(event);
+    return interviewForm();
+  });
+
+  /**
+   * The answers arrive, and the map goes back.
+   *
+   * Everything in the payload is checked here rather than trusted. The
+   * renderer is sandboxed and ours, but "ours" is the claim this boundary
+   * exists to not rely on — and the shape it sends decides what gets written
+   * into a record of somebody's system.
+   *
+   * ⚠️ A malformed reply is DROPPED, not repaired. Guessing what somebody
+   * meant and filing that as a thing they said is the one failure a profile
+   * must not have: every later screen reads `stated` as "they told me this".
+   */
+  ipcMain.handle(CHANNELS.saveProfile, (event, payload: unknown): ProfileFacts | null => {
+    assertAppWindow(event);
+    return saveProfile(validReplies(payload), new Date().toISOString());
+  });
+
+  /**
+   * A person agreed with what was shown for one area.
+   *
+   * 🟥 The only path to `verified` in the product. An area name that is not
+   * one of the five is answered with the map unchanged rather than an error:
+   * nothing was promoted, and the window has no branch that would do anything
+   * different with a throw.
+   */
+  ipcMain.handle(CHANNELS.confirmArea, (event, area: unknown): ProfileFacts | null => {
+    assertAppWindow(event);
+    const parsed = ProfileArea.safeParse(area);
+    if (!parsed.success) return currentFacts();
+    return confirmArea(parsed.data, new Date().toISOString());
   });
 
   ipcMain.handle(

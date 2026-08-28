@@ -16,9 +16,16 @@
  *
  * Every string that reaches the reader through `ScanOutcome` was composed by
  * the backend: `describeScope`, `scopeStripLine`, `reportVerdict`,
- * `finding.plainText` / `.technical` / `.boundary`, `history.lines()`, and the
- * `scan.cost` entry in the message catalogue. This file chooses which of them
+ * `finding.plainText` / `.technical` / `.boundary`, `history.lines()`,
+ * `QueryBudget.disclosure()`, and three entries in the message catalogue —
+ * `scan.cost` and the two boundary lead-ins. This file chooses which of them
  * to pass on and in what order; it never phrases one.
+ *
+ * Choosing a catalogue KEY is still choosing, and one of those choices carries
+ * meaning: which lead-in a boundary arrives under says whether the scan looked
+ * and found nothing or could not look. That decision is made by claim kind in
+ * `boundarySentence` below, off the finding, never by anything this file
+ * observed for itself.
  *
  * That is hard rule 2 and §4.1b together, and the restriction is doing real
  * work rather than decorating. A sentence typed here would be a sentence no
@@ -59,6 +66,7 @@ import {
   buildScopeStrip,
   num,
   reportVerdict,
+  planRank,
   scopeStripLine,
   sealFindings,
   translator,
@@ -79,10 +87,11 @@ import {
 // says the desktop is the reason: the shell must write into the same file the
 // CLI writes into, or a later `diffRuns` reads a timeline with a seam in it
 // that nothing marks. Imported, never copied.
-import { RunHistory, ruleRunsFrom } from '@ledar/store';
+import { RunHistory, databaseFingerprint, identityFrom, ruleRunsFrom } from '@ledar/store';
 
 import type { ReportFinding, ScanOutcome, SessionHandle } from '../shared/ipc.js';
 import { SCHEMAS } from './connect-flow.js';
+import { currentPlan, noteObservations } from './profile-flow.js';
 import { closeSession, dsnFor } from './session.js';
 
 /**
@@ -111,36 +120,96 @@ function saysNothingFound(f: Finding): f is StatesABoundary {
 }
 
 /**
- * The two claim kinds that carry a `boundary`, named by extraction.
+ * The two claim kinds that assert nothing was found, named by extraction.
  *
  * Written as `Extract` rather than as its own object type so it cannot drift:
  * a sixth claim kind added to the union in `findings.ts` either lands in here
  * or does not, and either way this stays a description of that union rather
- * than a second opinion about it. The type predicate above is what lets the
- * compiler agree that a finding filed under one of these has a boundary to
- * read — without it, reading `.boundary` is a claim the type system has no
- * reason to accept, and reading it off the other three kinds would be
- * reaching for a field that is not there.
+ * than a second opinion about it.
+ *
+ * ⚠️ It used to be called "the two kinds that carry a `boundary`", and that
+ * name has stopped being true: since N50 every kind carries one. What these
+ * two still share is what they SAY — nothing was found — which is what the
+ * verdict arithmetic below needs to count, and which is a different question
+ * from whether a finding states its limits.
  */
 type StatesABoundary = Extract<Finding, { kind: 'negative' } | { kind: 'abstained' }>;
 
 /**
  * One finding, in the shape the window renders.
  *
- * `boundary` exists on the `negative` and `abstained` members of `Finding` and
- * on no others, which is why the contract types it `string | null` rather than
- * optional: null here means this kind of claim has no boundary to state, not
- * that a boundary was dropped on the way out. The contract's own comment on
- * the field — "never cut" — is about the second case, and the only way to keep
- * that promise is to read the field off the finding and never anywhere else.
+ * `boundary` is on every finding as of N50, and the field crossing this bridge
+ * is no longer nullable either. That removed the last piece of meaning this
+ * contract carried in an ABSENCE: there is now no arrangement of these fields
+ * in which a claim reaches the window without the limits of the measurement
+ * that produced it. The contract's own word for the field — "never cut" — is
+ * kept by reading it off the finding and never anywhere else.
+ *
+ * `kind` goes across as itself (debt N49). It used to stay behind, and the
+ * only trace of it on the far side was that same `boundary` being non-null —
+ * so anything on the window wanting to know whether a finding was an
+ * ACCUSATION had to read the answer out of an absence. That is the habit the
+ * CLI prints its coverage figures unconditionally to avoid; this bridge had
+ * been quietly relying on it.
  */
 function toReportFinding(f: Finding, section: 'confirms' | 'patterns'): ReportFinding {
   return {
     plainText: f.plainText,
     technical: f.technical,
     section,
-    boundary: saysNothingFound(f) ? f.boundary : null,
+    kind: f.kind,
+    boundary: boundarySentence(f),
   };
+}
+
+/**
+ * The boundary clause, lead-in included — composed here, chosen by claim kind.
+ *
+ * 🟥 This used to hand over `f.boundary` bare, and that lost something the
+ * data had been carefully built to carry. `apps/cli/src/scan.ts` picks between
+ * two lead-ins and says why: *"'but only this far' is the right lead-in for a
+ * negative — it caveats a result. An abstention has no result to caveat, so it
+ * says what it is instead. The sentence a reader skims has to differ, or the
+ * split that debt N8 made in the data never reaches them."* The window was the
+ * surface where that split never reached them: both kinds arrived as the same
+ * naked sentence, and the renderer's own comment claimed the prefix was
+ * already on it.
+ *
+ * Composed on this side rather than in the renderer for the reason at the top
+ * of this file — every sentence about the database is the backend's — and the
+ * catalogue entries are the same two the CLI uses, so the two surfaces cannot
+ * word it differently.
+ *
+ * The switch is exhaustive on purpose. A sixth claim kind in `findings.ts`
+ * fails to compile here rather than falling into a default that returns null,
+ * which would file it, silently, as a claim with nothing to disclose.
+ *
+ * Exported for one reason: which lead-in goes with which kind is a law, and a
+ * law nothing pins is a law that survives exactly until somebody tidies it.
+ * Reaching it through a whole scan would mean finding a database that produces
+ * an abstention on demand, and the fixture does not have one — so the test
+ * would end up pinning nothing while looking like it pinned something.
+ */
+export function boundarySentence(f: Finding): string {
+  switch (f.kind) {
+    // An abstention has no result to caveat, so it says what it is instead.
+    case 'abstained':
+      return T('scan.and-that-is-all', { boundary: f.boundary });
+    // Everything else caveats a result — a negative caveats "I found nothing"
+    // and a claim caveats the count it just stated. Both are the same act, and
+    // "but only this far" is the right lead-in for both.
+    //
+    // 🟥 These three used to return null and the comment here called that "the
+    // honest report of a gap" (debt N50). The gap is closed: every finding
+    // carries a boundary now, so the return type lost its `| null` and there
+    // is no branch left in which the window shows a claim with no limit
+    // beside it.
+    case 'negative':
+    case 'observation':
+    case 'inference':
+    case 'recommendation':
+      return T('scan.but-only-this-far', { boundary: f.boundary });
+  }
 }
 
 export async function runScanFlow(handle: unknown): Promise<ScanOutcome> {
@@ -218,11 +287,80 @@ export async function runScanFlow(handle: unknown): Promise<ScanOutcome> {
     history = await RunHistory.open(dsn, manifest, LANG);
 
     const graph = await readSchemaGraph(client, SCHEMAS);
+
+    /**
+     * What the schema itself says about the five areas — ideal §12's audit.
+     *
+     * Runs here rather than in its own pass because the graph is already read
+     * and it costs nothing more: `observeAreas` looks at NAMES only, so this
+     * adds no query, touches no row, and cannot slow anyone's database down.
+     *
+     * ⚠️ It observes and records; it decides nothing. The map is only built
+     * when the person's answers arrive (`profile-flow.saveProfile`), because
+     * a map assembled from one half would be a claim about somebody's system
+     * with nothing on the other side of it to disagree.
+     *
+     * A fingerprint that cannot be derived means the run cannot be filed
+     * against a database either — `RunHistory.open` below says the same thing
+     * about itself — so the observations are dropped rather than filed under
+     * a guess.
+     */
+    const identity = identityFrom(dsn, scope.database);
+    if (identity !== null) {
+      noteObservations(
+        databaseFingerprint(identity),
+        {
+          // `schemasGranted`, not everything the server has. A schema this
+          // role cannot enter is one the scan never saw inside, and letting a
+          // NAME alone settle an area would be observing something through a
+          // door that stayed shut.
+          schemas: scope.schemasGranted,
+          // 🟥 Partitions dropped. Pagila's `payment` has 54 of them, and
+          // without this the window would be told the product saw a payments
+          // table 55 times — one sighting per partition, all of them the same
+          // table wearing a date. A count that inflates with a storage detail
+          // is a count that tells a reader something untrue about their own
+          // system.
+          tables: graph.tables
+            .filter((t) => !t.isPartition)
+            .map((t) => ({ schema: t.schema, table: t.table })),
+          columns: graph.columns.map((c) => ({
+            schema: c.schema,
+            table: c.table,
+            name: c.name,
+          })),
+        },
+        new Date().toISOString(),
+      );
+    }
+
     const empty = await probeEmptyTables(client, graph.tables);
     // Half each. Neither layer gets to starve the other by running first,
     // which is what happens with one shared pot consumed in order.
     const layerA = await runLayerA(client, graph, budget.share(0.5), LANG);
-    const layerB = await runImplicitForeignKeys(client, graph, budget.share(0.5), LANG);
+    /**
+     * Ideal §25, and the first thing the profile is allowed to change.
+     *
+     * The plan does not decide WHETHER a column is examined — every candidate
+     * the budget reaches is still examined, and every one it does not is set
+     * aside by name. It decides the ORDER, which is the answer to *"if the
+     * ceiling stops me halfway, which half did I spend it on?"* Before this
+     * the answer was whatever order the catalog returned.
+     *
+     * Null on the first scan of a database nobody has answered questions about
+     * yet, and null is passed straight through — `runImplicitForeignKeys`
+     * treats it as "the order you already had", so a person who has not been
+     * asked anything gets exactly the behaviour that shipped before this.
+     */
+    const plan = currentPlan();
+    const layerB = await runImplicitForeignKeys(
+      client,
+      graph,
+      budget.share(0.5),
+      LANG,
+      undefined,
+      plan === null ? null : (_schema, table) => planRank(plan, table),
+    );
 
     // The line the report is never allowed to be without, built before any of
     // it is assembled. `buildScopeStrip` refuses rather than rendering a best
@@ -368,7 +506,13 @@ export async function runScanFlow(handle: unknown): Promise<ScanOutcome> {
           : null,
       },
     ]);
-    history.complete(budget.spend, budget.disclosure());
+    // Read ONCE, into a name, and handed to both the record and the reader.
+    // Calling `budget.disclosure()` twice would work today and is exactly the
+    // shape that stops working the day it composes anything from a counter —
+    // and the failure would be the file saying one thing and the screen
+    // another about the same scan, which is the seam N51 was filed under.
+    const cut = budget.disclosure();
+    history.complete(budget.spend, cut);
 
     const spent = budget.spend;
 
@@ -388,6 +532,8 @@ export async function runScanFlow(handle: unknown): Promise<ScanOutcome> {
         seconds: (spent.totalMs / 1000).toFixed(1),
         rows: num(spent.rowsScanned, LANG),
       }),
+      // The budget's own words, not a summary of them. N51.
+      disclosure: cut,
       historyLines: history.lines(),
       revokeSql: scope.revokeSql,
     };
