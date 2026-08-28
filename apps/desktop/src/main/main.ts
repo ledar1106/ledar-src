@@ -24,6 +24,7 @@ import { devPrefill } from './dev.js';
 import { registerIpc } from './ipc.js';
 import { hardenAllWebContents } from './security.js';
 import { APP_ORIGIN, registerAppProtocol } from './serve.js';
+import { forgetObservations } from './profile-flow.js';
 import { closeAllSessions } from './session.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url)); // .../dist/node/main
@@ -103,6 +104,17 @@ if (!app.requestSingleInstanceLock()) {
   // is a process that can still be attached to and dumped.
   app.on('will-quit', () => {
     closeAllSessions();
+    // 🟥 The same argument, one step further in. What this holds is not a
+    // credential but it is a description of somebody's private system — a
+    // database fingerprint, five answers they gave, and the map of how their
+    // tables connect. A process lingering with that in a module variable is a
+    // process that can be attached to and dumped, exactly as above.
+    //
+    // Added 2026-08-28 because `profile-flow` already CLAIMED this in a
+    // comment — "cleared by `forgetObservations` when a session closes" — and
+    // nothing called it. The claim was written first and the call never
+    // followed, so the state outlived every window for as long as the app ran.
+    forgetObservations();
   });
 
   void app.whenReady().then(() => {

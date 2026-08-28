@@ -30,7 +30,7 @@ import {
   reconcile,
   strongestFor,
 } from '../src/index.js';
-import type { Observation, SchemaShape, StatedAnswer } from '../src/index.js';
+import type { Observation, ProjectProfile as Profile, SchemaShape, StatedAnswer } from '../src/index.js';
 
 const AT = '2026-08-27T00:00:00.000Z';
 const LATER = '2026-08-28T00:00:00.000Z';
@@ -249,5 +249,225 @@ describe('putting what was said next to what was seen', () => {
     // of a table name, is the product mistaking a guess for a measurement.
     const p = reconcile(BASE, [{ area: 'payment', answer: 'no' }], orders, LATER);
     assert.deepEqual(conflictsIn(p), []);
+  });
+});
+
+/**
+ * 🟥 A human agreement is the one thing on this ladder that cannot be
+ * re-derived, and reconcile used to throw it away.
+ *
+ * Found by audit 2026-08-28. `reconcile` rebuilt every area from `said` and
+ * `observations` and never read `base.areas`, so the sequence a person
+ * actually performs — confirm, close the app, reopen, scan, answer the five
+ * questions again — silently demoted `verified` back to `observed` and dropped
+ * `confirmedAt` with it. Nothing said anything. The next screen simply stopped
+ * treating a settled question as settled.
+ */
+describe('what a person already agreed to', () => {
+  const AT = '2026-08-28T00:00:00.000Z';
+  const LATER = '2026-08-29T00:00:00.000Z';
+
+  const SEEN: SchemaShape = {
+    schemas: ['public'],
+    tables: [{ schema: 'public', table: 'users' }],
+    columns: [{ schema: 'public', table: 'users', name: 'stripe_customer_id' }],
+  };
+
+  /** A profile where `payment` has been confirmed by a person. */
+  function withVerifiedPayment(): Profile {
+    const base = reconcile(
+      emptyProfile('fp', AT),
+      [],
+      observeAreas(SEEN, AT),
+      AT,
+    );
+    const seen = base.areas.payment;
+    assert.ok(seen !== undefined);
+    assert.ok(seen.state === 'suspected' || seen.state === 'observed');
+    return {
+      ...base,
+      areas: {
+        ...base.areas,
+        payment: { state: 'verified', evidence: seen.evidence, confirmedAt: AT },
+      },
+    };
+  }
+
+  it('🟥 survives the next scan and the next set of answers', () => {
+    const after = reconcile(
+      withVerifiedPayment(),
+      [{ area: 'payment', answer: 'yes', picked: ['Stripe'] }],
+      observeAreas(SEEN, LATER),
+      LATER,
+    );
+    assert.equal(after.areas.payment.state, 'verified');
+  });
+
+  it('🟥 keeps WHEN it was agreed, not just that it was', () => {
+    // `confirmedAt` rather than a boolean is the contract's own choice: six
+    // months on the question is not whether somebody agreed but when. Refreshed
+    // to `LATER` it would claim an agreement that never happened today.
+    const after = reconcile(
+      withVerifiedPayment(),
+      [],
+      observeAreas(SEEN, LATER),
+      LATER,
+    );
+    assert.equal(
+      after.areas.payment.state === 'verified' ? after.areas.payment.confirmedAt : null,
+      AT,
+    );
+  });
+
+  it('🟥 does NOT survive when what they agreed to has gone', () => {
+    // The other half, and it has to be the other half. They agreed to
+    // evidence; if the column is dropped, keeping `verified` asserts something
+    // about a database that no longer contains it.
+    const after = reconcile(
+      withVerifiedPayment(),
+      [],
+      observeAreas({ schemas: ['public'], tables: [], columns: [] }, LATER),
+      LATER,
+    );
+    assert.notEqual(after.areas.payment.state, 'verified');
+  });
+
+  it('🟥 a person changing their mind outranks their old agreement', () => {
+    // Saying "no" to something previously confirmed is a real edit, not noise
+    // to be overridden by the confirmation it contradicts.
+    const after = reconcile(
+      withVerifiedPayment(),
+      [{ area: 'payment', answer: 'no', picked: [] }],
+      observeAreas(SEEN, LATER),
+      LATER,
+    );
+    assert.notEqual(after.areas.payment.state, 'verified');
+  });
+
+  it('an area nobody confirmed is untouched by any of this', () => {
+    const after = reconcile(
+      withVerifiedPayment(),
+      [{ area: 'jobs', answer: 'yes', picked: ['pg_cron'] }],
+      observeAreas(SEEN, LATER),
+      LATER,
+    );
+    assert.equal(after.areas.jobs.state, 'stated');
+  });
+});
+
+/**
+ * 🟥 One column, seen once, however many partitions the table has.
+ *
+ * Found by audit 2026-08-28. The scan filtered partitions out of `tables` and
+ * not out of `columns` — the guard on the path that did not need it, while the
+ * path that did was open. `strongestFor` keeps every sighting, so a card for
+ * one column rendered a line per month.
+ *
+ * Tested here rather than only in the shell, because `SchemaShape` is where
+ * the rule is written and this is the shape any future caller will build.
+ */
+describe('a partitioned table is one table', () => {
+  const AT = '2026-08-28T00:00:00.000Z';
+  const MONTHS = Array.from({ length: 55 }, (_, i) => `events_p2022_${String(i + 1).padStart(2, '0')}`);
+
+  it('🟥 56 copies of a column produce 56 lines of evidence when they get in', () => {
+    // The bug, pinned as a measurement. If a later change makes `observeAreas`
+    // dedupe internally this test goes red and the one below stops proving
+    // anything on its own — which is the point of measuring both ends.
+    const leaked = observeAreas(
+      {
+        schemas: ['public'],
+        tables: [{ schema: 'public', table: 'events' }],
+        columns: ['events', ...MONTHS].map((table) => ({
+          schema: 'public',
+          table,
+          name: 'stripe_customer_id',
+        })),
+      },
+      AT,
+    );
+    assert.equal(strongestFor(leaked, 'payment')?.evidence.length, 56);
+  });
+
+  it('🟥 the shape a caller is supposed to build gives exactly one', () => {
+    const clean = observeAreas(
+      {
+        schemas: ['public'],
+        tables: [{ schema: 'public', table: 'events' }],
+        columns: [{ schema: 'public', table: 'events', name: 'stripe_customer_id' }],
+      },
+      AT,
+    );
+    const seen = strongestFor(clean, 'payment');
+    assert.equal(seen?.evidence.length, 1);
+    assert.equal(seen?.evidence[0]?.where, 'public.events.stripe_customer_id');
+  });
+});
+
+/**
+ * 🟥 What somebody said yes ABOUT.
+ *
+ * Found by audit 2026-08-28. `picked` lived only on the `stated` rung, so a
+ * person answering "yes — Supabase and Stripe" kept those words exactly as
+ * long as the scan found nothing. The moment it saw a `stripe_customer_id`
+ * column the rung became `observed`, and their answer lost its content. The
+ * card then read "You said: yes" about nothing in particular.
+ *
+ * It is the half of the profile a person can correct, and nobody corrects what
+ * they cannot see they said — ideal §24.
+ */
+describe('the list a person picked', () => {
+  const AT = '2026-08-28T00:00:00.000Z';
+
+  const SEEN: SchemaShape = {
+    schemas: ['public'],
+    tables: [{ schema: 'public', table: 'users' }],
+    columns: [{ schema: 'public', table: 'users', name: 'stripe_customer_id' }],
+  };
+  const NOTHING: SchemaShape = { schemas: ['public'], tables: [], columns: [] };
+
+  const SAID = [{ area: 'payment' as const, answer: 'yes' as const, picked: ['Stripe', 'Paypal'] }];
+
+  it('🟥 survives the scan finding what they were talking about', () => {
+    const after = reconcile(emptyProfile('fp', AT), SAID, observeAreas(SEEN, AT), AT);
+    const payment = after.areas.payment;
+    assert.ok(payment.state === 'suspected' || payment.state === 'observed');
+    assert.deepEqual(payment.statedPicked, ['Stripe', 'Paypal']);
+  });
+
+  it('keeps their order, because it is their sentence', () => {
+    const after = reconcile(
+      emptyProfile('fp', AT),
+      [{ area: 'payment', answer: 'yes', picked: ['Paypal', 'Stripe'] }],
+      observeAreas(SEEN, AT),
+      AT,
+    );
+    const payment = after.areas.payment;
+    assert.deepEqual(
+      payment.state === 'observed' || payment.state === 'suspected' ? payment.statedPicked : null,
+      ['Paypal', 'Stripe'],
+    );
+  });
+
+  it('is empty, not absent, when they said yes and picked nothing', () => {
+    const after = reconcile(
+      emptyProfile('fp', AT),
+      [{ area: 'payment', answer: 'yes' }],
+      observeAreas(SEEN, AT),
+      AT,
+    );
+    const payment = after.areas.payment;
+    assert.deepEqual(
+      payment.state === 'observed' || payment.state === 'suspected' ? payment.statedPicked : null,
+      [],
+    );
+  });
+
+  it('still reaches the stated rung when nothing was seen', () => {
+    // The path that always worked. Kept, so a fix to the other one cannot
+    // quietly break this.
+    const after = reconcile(emptyProfile('fp', AT), SAID, observeAreas(NOTHING, AT), AT);
+    const payment = after.areas.payment;
+    assert.deepEqual(payment.state === 'stated' ? payment.picked : null, ['Stripe', 'Paypal']);
   });
 });

@@ -99,7 +99,33 @@ import type { DatabaseSync } from 'node:sqlite';
  * it went. The same bump after the profile has been asked for a year would
  * cost people the answers they gave.
  */
-export const SCHEMA_VERSION = 7;
+/**
+ * 7 → 8, `entity_map` and `entity_edge` — ideal §31. Two new tables again, so
+ * a schema-7 file keeps its shape and `RetiredHistoryReader` still reads it
+ * (`REQUIRED` mentions neither).
+ *
+ * This one buys something the profile bump did not. The map is derived wholly
+ * from a scan and costs no query to rebuild, so storing it is not about saving
+ * work — it is about being able to answer *"what touches this customer"*
+ * WITHOUT opening somebody's database at all. That is the difference between
+ * a product that remembers a system and one that re-learns it every morning,
+ * and ideal §45 is the sentence for it.
+ */
+/**
+ * 8 → 9, `project_profile_area.stated_picked_json` — ideal §24.
+ *
+ * A column rather than a table, and the second bump in one day. The rule this
+ * store lives under is that it refuses every version it does not speak, and
+ * *"it would probably work"* is exactly what that refusal was built to hold —
+ * so an added column is a bump like any other, even one added an hour after
+ * the last.
+ *
+ * What it holds: the list a person picked when they answered yes. It survived
+ * only while nothing had been seen, because `a_sighting_names_what_was_seen`
+ * forbade `picked_json` on those rungs and there was nowhere else to put it.
+ * The moment a scan found anything, "Supabase and Stripe" became "yes".
+ */
+export const SCHEMA_VERSION = 9;
 
 /**
  * The closed vocabularies, copied here on purpose — and tripwired.
@@ -210,6 +236,14 @@ const KNOWLEDGE_STATES_SQL =
  */
 const AREA_ANSWERS_SQL = "'yes', 'no', 'dont_know'";
 
+/**
+ * The three tiers of the entity map.
+ *
+ * Ordered strongest first, matching `EDGE_TIERS`, because the order is what
+ * `strongestFirst` sorts by and a path is only as strong as its weakest hop.
+ */
+const EDGE_TIERS_SQL = "'declared', 'measured', 'guessed'";
+
 /** Every list above, keyed the way the tripwire test reads them. */
 export const STORE_VOCABULARY: Readonly<Record<string, readonly string[]>> = {
   kind: KINDS.split(',').map((v) => v.trim().replace(/'/g, '')),
@@ -229,6 +263,7 @@ export const STORE_VOCABULARY: Readonly<Record<string, readonly string[]>> = {
   // and mean different things there. The tripwire watches the LIST, and there
   // is one list.
   areaAnswer: AREA_ANSWERS_SQL.split(',').map((v) => v.trim().replace(/'/g, '')),
+  edgeTier: EDGE_TIERS_SQL.split(',').map((v) => v.trim().replace(/'/g, '')),
 };
 
 const DDL: readonly string[] = [
@@ -740,6 +775,18 @@ const DDL: readonly string[] = [
     stated_answer TEXT
       CHECK (stated_answer IS NULL OR stated_answer IN (${AREA_ANSWERS_SQL})),
 
+    -- What they picked, on a rung where something was also SEEN.
+    --
+    -- 🟥 Its own column rather than reusing \`picked_json\`, exactly as
+    -- \`stated_answer\` is its own column rather than reusing \`answer\`. Each
+    -- pair is the same vocabulary said at a different rung, and the four union
+    -- CHECKs are phrased against which columns may be non-null — so a shared
+    -- column would make 'stated' and 'observed' indistinguishable to the
+    -- constraint whose whole job is telling them apart.
+    stated_picked_json TEXT
+      CONSTRAINT stated_picked_is_a_list
+        CHECK (stated_picked_json IS NULL OR json_type(stated_picked_json) = 'array'),
+
     -- When they agreed, not whether. Six months on the question is never
     -- whether somebody once said yes; a system changes, and an agreement about
     -- March is not an agreement about now.
@@ -760,6 +807,7 @@ const DDL: readonly string[] = [
     CONSTRAINT unknown_says_nothing CHECK (
       state <> 'unknown' OR (
         answer IS NULL AND picked_json IS NULL AND evidence_json IS NULL
+        AND stated_picked_json IS NULL
         AND stated_answer IS NULL AND confirmed_at IS NULL
       )
     ),
@@ -768,7 +816,7 @@ const DDL: readonly string[] = [
     -- filed under the rung that means nothing was seen.
     CONSTRAINT stated_is_only_what_was_said CHECK (
       state <> 'stated' OR (
-        answer IS NOT NULL AND picked_json IS NOT NULL
+        answer IS NOT NULL AND picked_json IS NOT NULL AND stated_picked_json IS NULL
         AND evidence_json IS NULL AND stated_answer IS NULL
         AND confirmed_at IS NULL
       )
@@ -783,6 +831,9 @@ const DDL: readonly string[] = [
       state NOT IN ('suspected', 'observed') OR (
         evidence_json IS NOT NULL AND json_array_length(evidence_json) >= 1
         AND answer IS NULL AND picked_json IS NULL AND confirmed_at IS NULL
+        -- stated_picked_json is deliberately NOT forced null here: it is the
+        -- one thing these two rungs carry beyond the sighting, and it travels
+        -- with stated_answer.
       )
     ),
 
@@ -808,10 +859,99 @@ const DDL: readonly string[] = [
         evidence_json IS NOT NULL AND json_array_length(evidence_json) >= 1
         AND confirmed_at IS NOT NULL AND trim(confirmed_at) <> ''
         AND answer IS NULL AND picked_json IS NULL AND stated_answer IS NULL
+        AND stated_picked_json IS NULL
       )
     ),
 
     PRIMARY KEY (database_id, area)
+  ) STRICT
+  `,
+
+  /**
+   * The map of one database — ideal §31.
+   *
+   * A row per database and nothing else, which looks like an empty table until
+   * you ask what its absence means. `entity_edge` alone could not tell *"this
+   * database has no relationships"* apart from *"nobody has built a map"*, and
+   * those are opposite sentences to say to somebody who has just inherited a
+   * system. This row is what makes the first one sayable.
+   */
+  `
+  CREATE TABLE entity_map (
+    database_id INTEGER PRIMARY KEY REFERENCES scanned_database(id) ON DELETE CASCADE,
+
+    -- Stored as it arrived, like project_profile.updated_at and for the same
+    -- reason: there is one map per database, nothing orders by this, and
+    -- normalising would cost exactness to buy nothing.
+    built_at TEXT NOT NULL CHECK (trim(built_at) <> '')
+  ) STRICT
+  `,
+
+  /**
+   * One connection, and what earns it.
+   *
+   * ## The constraint that is the point of this table
+   *
+   * `rate_belongs_to_measured`. The contract's `EntityEdge` is a discriminated
+   * union on `tier`, and the whole content of that union is which fields may
+   * exist at which tier — `matched` belongs to `measured` and to nothing else.
+   * Written as a blob, that rule would live only in the code that writes the
+   * blob, and this file's header says what that is worth: the second writer
+   * (an import tool, a repair script at 2am, somebody with the sqlite3 CLI)
+   * will not know it existed.
+   *
+   * What it stops is specific. A `declared` edge carrying `of=100, found=60`
+   * reads as though somebody counted and found 60% of an enforced constraint
+   * holding — a number with no counting behind it, in front of a person whose
+   * entire reason for being here is that they cannot check it themselves. The
+   * contract refuses it. So does this.
+   *
+   * `found <= of` for the same reason: a rate above one is not a strong edge,
+   * it is a bug in whatever counted, and it would print an impossible
+   * percentage.
+   *
+   * ## Why `why` is checked with trim()
+   *
+   * 🟥 `why` is where every limit of an edge lives, and the limits are not
+   * decoration. Measured 2026-08-28: all 758 of MusicBrainz's foreign keys are
+   * `NOT VALID`, and 49 of Pagila's 55 `payment` partitions are not covered by
+   * the key the other 6 declare. In both cases the tier stays `declared` and
+   * the ONLY thing standing between a reader and an overclaim is this string.
+   * An edge with a blank `why` is an enforcement claim with its limit deleted.
+   *
+   * `trim()`, not `<> ''`, because `<> ''` accepts `'  '` — the exact hole
+   * found in `verified_is_seen_and_agreed` on the day this was written, in a
+   * column nobody would think to look at twice.
+   */
+  `
+  CREATE TABLE entity_edge (
+    database_id INTEGER NOT NULL
+      REFERENCES entity_map(database_id) ON DELETE CASCADE,
+
+    from_schema TEXT NOT NULL CHECK (trim(from_schema) <> ''),
+    from_table  TEXT NOT NULL CHECK (trim(from_table)  <> ''),
+    to_schema   TEXT NOT NULL CHECK (trim(to_schema)   <> ''),
+    to_table    TEXT NOT NULL CHECK (trim(to_table)    <> ''),
+
+    -- The child column, always. An edge nobody can point at is an edge nobody
+    -- can check, and this product does not get to assert those.
+    via  TEXT NOT NULL CHECK (trim(via) <> ''),
+    tier TEXT NOT NULL CHECK (tier IN (${EDGE_TIERS_SQL})),
+    why  TEXT NOT NULL CHECK (trim(why) <> ''),
+
+    matched_of    INTEGER CHECK (matched_of    IS NULL OR matched_of    >= 0),
+    matched_found INTEGER CHECK (matched_found IS NULL OR matched_found >= 0),
+
+    CONSTRAINT rate_belongs_to_measured CHECK (
+      (tier = 'measured') = (matched_of IS NOT NULL)
+      AND (matched_of IS NULL) = (matched_found IS NULL)
+      AND (matched_found IS NULL OR matched_found <= matched_of)
+    ),
+
+    -- One relationship is one row. A table can point at the same parent twice
+    -- through different columns and those are two relationships, which is why
+    -- \`via\` is in the key rather than just the two ends.
+    PRIMARY KEY (database_id, from_schema, from_table, via, to_schema, to_table)
   ) STRICT
   `,
 ];

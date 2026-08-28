@@ -48,9 +48,9 @@ const api: LedarBridge = {
   interviewForm: (): Promise<InterviewForm> => ipcRenderer.invoke('ledar:interview-form'),
   // Passed on as-is. Validation lives in main/ipc.ts, where the boundary is —
   // this file coerces the shapes it can (a string) and never inspects the rest.
-  saveProfile: (replies: readonly AreaReply[]): Promise<ProfileFacts> =>
+  saveProfile: (replies: readonly AreaReply[]): Promise<ProfileFacts | null> =>
     ipcRenderer.invoke('ledar:save-profile', replies),
-  confirmArea: (area: ProfileArea): Promise<ProfileFacts> =>
+  confirmArea: (area: ProfileArea): Promise<ProfileFacts | null> =>
     ipcRenderer.invoke('ledar:confirm-area', String(area)),
   devPrefill: (): Promise<DevPrefill> => ipcRenderer.invoke('ledar:dev-prefill'),
   devReport: (line: string): void => {

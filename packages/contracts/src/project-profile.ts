@@ -129,8 +129,17 @@ export const AREA_OPTIONS: Readonly<Record<ProfileArea, readonly string[]>> = {
  * stated     the person said so, and nothing has checked it
  * suspected  the scan saw something that points this way, unconfirmed
  * observed   the scan saw it, and can name what it saw
- * verified   observed AND the person agreed with what was shown to them
+ * verified   SEEN — suspected or observed — shown to the person, and agreed
  * ```
+ *
+ * ⚠️ `verified` reads up from `suspected` as well as from `observed`, and the
+ * line above said "observed AND" until 2026-08-28, which described a narrower
+ * product than the one that exists. Confirming a mere hint is not a lesser
+ * confirmation — it is the most valuable one there is, because it is the case
+ * where the scan could not be sure and the person could. What `verified` never
+ * reads up from is `stated` or `unknown`: with nothing seen there is nothing
+ * to show somebody, and agreement about nothing is how this ladder would
+ * manufacture the one rung that means a human was involved.
  *
  * 🟥 `stated` is NOT above `suspected`, and the order above is not a ranking.
  * A person saying "we use Stripe" and a scan finding a `stripe_customer_id`
@@ -208,6 +217,21 @@ export const AreaKnowledge = z.discriminatedUnion('state', [
     state: z.literal('suspected'),
     evidence: z.array(ProfileEvidence).min(1),
     stated: AreaAnswer.nullable(),
+    /**
+     * What they picked from the list, when they said yes.
+     *
+     * 🟥 Carried here for the same reason `stated` is, and it was NOT until
+     * 2026-08-28. A person answering "yes — Supabase and Stripe" kept those
+     * words only while nothing was seen; the moment the scan found a
+     * `stripe_customer_id` column the rung became `observed` and their answer
+     * lost its content. The card then said "you said yes" with no record of
+     * what they said yes ABOUT.
+     *
+     * That is the half of the profile a person can actually correct. §24 says
+     * a profile is meant to be EDITED, and nobody edits what they cannot see
+     * they said.
+     */
+    statedPicked: z.array(z.string()).default([]),
   }),
 
   /** The scan saw it plainly. Still not confirmed by a person. */
@@ -216,6 +240,21 @@ export const AreaKnowledge = z.discriminatedUnion('state', [
     evidence: z.array(ProfileEvidence).min(1),
     /** Present when the person had also answered, so the two can be compared. */
     stated: AreaAnswer.nullable(),
+    /**
+     * What they picked from the list, when they said yes.
+     *
+     * 🟥 Carried here for the same reason `stated` is, and it was NOT until
+     * 2026-08-28. A person answering "yes — Supabase and Stripe" kept those
+     * words only while nothing was seen; the moment the scan found a
+     * `stripe_customer_id` column the rung became `observed` and their answer
+     * lost its content. The card then said "you said yes" with no record of
+     * what they said yes ABOUT.
+     *
+     * That is the half of the profile a person can actually correct. §24 says
+     * a profile is meant to be EDITED, and nobody edits what they cannot see
+     * they said.
+     */
+    statedPicked: z.array(z.string()).default([]),
   }),
 
   /**
@@ -255,8 +294,31 @@ export const ProjectProfile = z.object({
    * in a file whose whole purpose is to be read often.
    */
   databaseFingerprint: z.string().min(1),
-  /** One entry per area, all five always present. */
-  areas: z.record(ProfileArea, AreaKnowledge),
+  /**
+   * One entry per area, all five always present.
+   *
+   * 🟥 Built from `PROFILE_AREAS` rather than written as `z.record`, because
+   * `z.record` made that sentence a comment rather than a rule: it types every
+   * lookup as possibly-undefined AND parses a profile carrying three areas
+   * without complaint. Found by audit 2026-08-28, the same shape as the
+   * `matched` field on `EntityEdge` — a promise in prose that the type did not
+   * keep.
+   *
+   * A missing area is not a smaller profile. `scanPlanFrom` ranks the five
+   * against each other, so an absent one silently becomes an area the scan
+   * never prioritises — and it would read as "nothing to do here" rather than
+   * "this was never asked", which are the two sentences this whole ladder
+   * exists to keep apart.
+   *
+   * The shape is derived from the one list, not typed out beside it: a second
+   * copy is exactly what N50 says goes stale invisibly.
+   */
+  areas: z.object(
+    Object.fromEntries(PROFILE_AREAS.map((area) => [area, AreaKnowledge])) as Record<
+      ProfileArea,
+      typeof AreaKnowledge
+    >,
+  ),
 });
 export type ProjectProfile = z.infer<typeof ProjectProfile>;
 
@@ -372,5 +434,10 @@ export function conflictsIn(profile: ProjectProfile): ProfileConflict[] {
  * fails here rather than in front of a person who skipped.
  */
 export function canPlanFrom(profile: ProjectProfile): boolean {
+  // ⚠️ Since `areas` became a closed object this cannot fail for anything the
+  // parser produced — the shape refuses a profile missing an area outright.
+  // Kept as the assertion it was written to be: it still runs on a profile
+  // built in memory without parsing, which is how every caller in this package
+  // makes one.
   return PROFILE_AREAS.every((area) => profile.areas[area] !== undefined);
 }

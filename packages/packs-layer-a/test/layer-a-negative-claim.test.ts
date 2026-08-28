@@ -70,7 +70,7 @@ function index(name: string): IndexInfo {
 function graphOf(constraints: Constraint[], indexes: IndexInfo[]): SchemaGraph {
   return {
     schemas: ['public'],
-    tables: [{ schema: 'public', table: 'orders', isPartition: false }],
+    tables: [{ schema: 'public', table: 'orders', isPartition: false, partitionOf: null }],
     totalTablesInSchemas: 1,
     constraints,
     indexes,

@@ -96,13 +96,52 @@ const WEIGHT: Readonly<Record<string, number>> = {
  */
 export function scanPlanFrom(profile: ProjectProfile): ScanPlan {
   const scored = PROFILE_AREAS.map((area, index) => {
+    // 🟥 No `?? 'unknown'` fallback. `areas` is a closed object over the five,
+    // so an absent one cannot reach here — and substituting a rung for it
+    // would be this function inventing the very state the ladder exists to
+    // distinguish from every other. If it ever CAN be absent again, this
+    // should break loudly rather than rank the area as never-asked.
     const known = profile.areas[area];
-    const state = known?.state ?? 'unknown';
-    // A `no` earns nothing. Somebody saying an area is not part of their
-    // system is the clearest instruction in the whole profile, and promoting
-    // it for having been mentioned would read every answer as interest.
-    const said = known?.state === 'stated' ? known.answer : null;
-    const weight = said === 'no' ? 0 : (WEIGHT[state] ?? 0);
+    const state = known.state;
+    /**
+     * A `no` earns nothing. Somebody saying an area is not part of their system
+     * is the clearest instruction in the whole profile, and promoting it for
+     * having been mentioned would read every answer as interest.
+     *
+     * 🟥 So does `dont_know`, and that was a bug until 2026-08-28. It scored
+     * the full `stated` weight, so answering the questions honestly made the
+     * plan WORSE than not answering at all. Measured on Pagila, person clicks
+     * "Skip all":
+     *
+     * ```text
+     * before                            after / saying nothing
+     *   database  observed                database  observed
+     *   auth      dont_know               payment   suspected   <- real evidence
+     *   storage   dont_know               auth      dont_know
+     *   jobs      dont_know               storage   dont_know
+     *   payment   suspected  <- last      jobs      dont_know
+     * ```
+     *
+     * `payment` is the one area with something actually visible in their
+     * schema, and three shrugs outranked it.
+     *
+     * `dont_know` is not a statement about the system, it is the absence of
+     * one — the same epistemic position as an area nobody has been asked
+     * about. It scores what that scores. What it must NOT do is displace
+     * something the scan can see.
+     */
+    const said = known.state === 'stated' ? known.answer : null;
+    // ⚠️ `no` goes BELOW `unknown`, not level with it. Writing the first test
+    // for this rule showed the code was weaker than the comment above it: at
+    // zero, a ruled-out area tied with one nobody has been asked about, and
+    // declaration order broke the tie — so "we do not use storage" and "nobody
+    // has mentioned storage" produced the same plan, decided by which area
+    // happens to be listed first in `PROFILE_AREAS`.
+    //
+    // A person ruling an area out is spending their budget somewhere else on
+    // purpose. Last is what that means, and it is still IN the plan: §25 says
+    // the order decides where the ceiling falls, never whether an area exists.
+    const weight = said === 'no' ? -1 : said === 'dont_know' ? 0 : (WEIGHT[state] ?? 0);
     return { area, index, weight, state, said };
   });
 
@@ -118,6 +157,12 @@ export function scanPlanFrom(profile: ProjectProfile): ScanPlan {
 
 function reasonFor(state: string, said: string | null): string {
   if (said === 'no') return 'you said this is not part of your system';
+  // 🟥 Its own sentence. This used to fall through to the `stated` case and
+  // tell somebody who had just said they did not know: "you told me about
+  // this." Three areas of a skipped interview said it at once.
+  if (said === 'dont_know') {
+    return 'you said you were not sure, so nothing here is being assumed';
+  }
   switch (state) {
     case 'verified':
       return 'you looked at what I found here and agreed';

@@ -394,9 +394,19 @@ test('an area dropped from the map does not survive the save that dropped it', (
     'the area has to be there first, or its removal below measures nothing',
   );
 
-  const withoutPayment = { ...first.areas };
+  // ⚠️ Cast, and deliberately. As of 2026-08-28 `ProjectProfile.areas` is a
+  // closed object over the five areas, so the CONTRACT refuses this profile —
+  // which is right, and is not what this test is about. `packages/store` holds
+  // no runtime dependency on contracts, so a four-area profile still reaches
+  // `writeProfile` from any second writer, and what happens then is the
+  // store's own business to get right.
+  const withoutPayment = { ...first.areas } as Record<string, unknown>;
   delete withoutPayment['payment'];
-  store.saveProfile({ ...first, version: first.version + 1, areas: withoutPayment });
+  store.saveProfile({
+    ...first,
+    version: first.version + 1,
+    areas: withoutPayment,
+  } as unknown as ProjectProfile);
 
   const read = store.loadProfile(FINGERPRINT);
   store.close();
@@ -502,6 +512,7 @@ test('evidence nobody could go and check is refused, and told why', () => {
             jobs: {
               state: 'observed',
               stated: null,
+              statedPicked: [],
               evidence: [evidence(over)],
             },
           },
@@ -630,4 +641,33 @@ test('a schema-6 history is retired rather than written into', async () => {
   store.saveProfile(fullProfile());
   assert.ok(store.loadProfile(FINGERPRINT));
   store.close();
+});
+
+test('🟥 what a person picked survives the scan that agreed with them', () => {
+  // Audit 2026-08-28. `picked` had nowhere to live on a rung that also carried
+  // a sighting — `a_sighting_names_what_was_seen` forbade `picked_json` there
+  // — so "Supabase and Stripe" became "yes" the moment the scan found the
+  // column they were describing. Round-tripped through the real file, because
+  // the contract carrying it and the store dropping it look identical from
+  // inside `packages/contracts`.
+  const store = storeWithDatabase(historyPath());
+  const base = emptyProfile(FINGERPRINT, AT);
+  store.saveProfile({
+    ...base,
+    areas: {
+      ...base.areas,
+      payment: {
+        state: 'observed',
+        stated: 'yes',
+        statedPicked: ['Stripe', 'Paypal'],
+        evidence: [evidence()],
+      },
+    },
+  });
+
+  const back = store.loadProfile(FINGERPRINT)?.areas['payment'];
+  store.close();
+
+  assert.equal(back?.state, 'observed');
+  assert.deepEqual(back?.state === 'observed' ? back.statedPicked : null, ['Stripe', 'Paypal']);
 });

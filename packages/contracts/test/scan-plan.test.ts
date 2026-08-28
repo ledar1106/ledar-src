@@ -32,7 +32,7 @@ import {
   reconcile,
   scanPlanFrom,
 } from '../src/index.js';
-import type { ProjectProfile } from '../src/index.js';
+import type { ProjectProfile, SchemaShape, StatedAnswer } from '../src/index.js';
 
 const AT = '2026-08-28T00:00:00.000Z';
 const BASE = emptyProfile('fp-plan', AT);
@@ -163,12 +163,25 @@ describe('what outranks what', () => {
     );
   });
 
-  it('🟥 "no" earns nothing — it is an instruction, not interest', () => {
+  it('🟥 "no" is an instruction, not interest — and it goes last', () => {
     // Promoting an area for having been mentioned would read every answer as
     // engagement, including the one that says "this is not part of my system".
+    //
+    // ⚠️ This test used to assert `no` kept its DECLARATION position, which
+    // pinned the weaker rule the code actually had: `no` scored zero, tied
+    // with every area nobody had been asked about, and the tie was broken by
+    // where the area happens to sit in `PROFILE_AREAS`. So "we do not use
+    // auth" and "nobody has mentioned auth" produced the same plan.
+    //
+    // Changed 2026-08-28 with the code. A person ruling an area out is
+    // spending their budget elsewhere on purpose, and last is what that means.
     const saidNo = withArea('auth', { state: 'stated', answer: 'no', picked: [] });
     const order = scanPlanFrom(saidNo).order;
-    assert.equal(order.indexOf('auth'), PROFILE_AREAS.indexOf('auth'));
+    assert.equal(order.at(-1), 'auth');
+    for (const area of PROFILE_AREAS) {
+      if (area === 'auth') continue;
+      assert.ok(order.indexOf(area) < order.indexOf('auth'), `${area} lost to a ruled-out area`);
+    }
     assert.match(scanPlanFrom(saidNo).because.auth, /not part of your system/);
   });
 
@@ -227,5 +240,125 @@ describe('a plan built from a real reconcile', () => {
     // the untouched areas, below the sighting.
     assert.equal(order[0], 'payment');
     assert.ok(order.indexOf('jobs') < order.indexOf('storage'));
+  });
+});
+
+/**
+ * 🟥 Answering the questions honestly must not make the plan worse than
+ * refusing to answer them.
+ *
+ * Found by audit 2026-08-28. `dont_know` scored the full `stated` weight, so a
+ * person who clicked "Skip all" — which sends `dont_know` for every unanswered
+ * area — pushed the ONE area with visible evidence to the bottom of the plan,
+ * beneath three shrugs. Measured on Pagila; the ⑤ block in the source has the
+ * before and after.
+ */
+describe('a shrug is not a statement', () => {
+  const AT = '2026-08-28T00:00:00.000Z';
+
+  /** Pagila's shape, roughly: something payment-ish visible, nothing else. */
+  const SEEN: SchemaShape = {
+    schemas: ['public'],
+    tables: [{ schema: 'public', table: 'users' }],
+    columns: [{ schema: 'public', table: 'users', name: 'stripe_customer_id' }],
+  };
+
+  function planAfter(said: readonly StatedAnswer[]) {
+    return scanPlanFrom(reconcile(emptyProfile('fp', AT), said, observeAreas(SEEN, AT), AT));
+  }
+
+  it('🟥 "I do not know" never outranks something the scan can see', () => {
+    const skipAll = PROFILE_AREAS.map((area) => ({
+      area,
+      answer: 'dont_know' as const,
+      picked: [],
+    }));
+    const order = planAfter(skipAll).order;
+    const shrugged = PROFILE_AREAS.filter((a) => a !== 'payment');
+    for (const area of shrugged) {
+      assert.ok(
+        order.indexOf('payment') < order.indexOf(area),
+        `${area} was ranked above the only area with evidence`,
+      );
+    }
+  });
+
+  it('🟥 skipping the interview gives the same order as never opening it', () => {
+    // The sharpest form of the bug: answering made things worse than silence.
+    const skipAll = PROFILE_AREAS.map((area) => ({
+      area,
+      answer: 'dont_know' as const,
+      picked: [],
+    }));
+    assert.deepEqual(planAfter(skipAll).order, planAfter([]).order);
+  });
+
+  it('🟥 and it is never told back to them as "you told me about this"', () => {
+    const plan = planAfter([{ area: 'jobs', answer: 'dont_know', picked: [] }]);
+    assert.ok(!/you told me/.test(plan.because.jobs));
+    assert.ok(/not sure/.test(plan.because.jobs));
+  });
+
+  it('an actual yes still outranks an area nobody mentioned', () => {
+    // The weight had to drop for `dont_know` alone. A person saying "yes, we
+    // run cron jobs" is a real statement and still earns its place.
+    const plan = planAfter([{ area: 'jobs', answer: 'yes', picked: ['pg_cron'] }]);
+    assert.ok(plan.order.indexOf('jobs') < plan.order.indexOf('storage'));
+    assert.equal(plan.because.jobs, 'you told me about this');
+  });
+});
+
+/**
+ * 🟥 "No" is the clearest instruction in the whole profile, and nothing was
+ * checking that the plan listened to it.
+ *
+ * Found by audit 2026-08-28 with a mutation: deleting the `no` clause left
+ * every test green while genuinely changing the order a scan runs in. The
+ * comment beside the code explained the rule at length and no test held it.
+ */
+describe('an area somebody ruled out', () => {
+  const AT = '2026-08-28T00:00:00.000Z';
+  const NOTHING: SchemaShape = { schemas: ['public'], tables: [], columns: [] };
+
+  function planAfter(said: readonly StatedAnswer[]) {
+    return scanPlanFrom(reconcile(emptyProfile('fp', AT), said, observeAreas(NOTHING, AT), AT));
+  }
+
+  it('🟥 does not get looked at before an area nobody has mentioned', () => {
+    // The mutation that survived: without the clause, `no` scores the `stated`
+    // weight and a person's clearest instruction PROMOTES the area instead.
+    const plan = planAfter([{ area: 'jobs', answer: 'no', picked: [] }]);
+    for (const area of PROFILE_AREAS) {
+      if (area === 'jobs') continue;
+      assert.ok(
+        plan.order.indexOf(area) < plan.order.indexOf('jobs'),
+        `jobs was ranked above ${area} despite being ruled out`,
+      );
+    }
+  });
+
+  it('🟥 ranks below "I do not know", which is not the same answer', () => {
+    // Both score zero, and ties keep declaration order — so this is pinned by
+    // making `no` come from the EARLIER area, where a tie would put it first.
+    const plan = planAfter([
+      { area: 'auth', answer: 'no', picked: [] },
+      { area: 'jobs', answer: 'dont_know', picked: [] },
+    ]);
+    assert.ok(plan.order.indexOf('jobs') < plan.order.indexOf('auth'));
+  });
+
+  it('is told back to them in their own terms', () => {
+    assert.equal(
+      planAfter([{ area: 'jobs', answer: 'no', picked: [] }]).because.jobs,
+      'you said this is not part of your system',
+    );
+  });
+
+  it('is still in the plan, at the end, rather than removed from it', () => {
+    // §25: the plan decides ORDER, never WHETHER. An area dropped entirely is
+    // one nobody can be told was skipped.
+    const plan = planAfter([{ area: 'jobs', answer: 'no', picked: [] }]);
+    assert.equal(plan.order.length, PROFILE_AREAS.length);
+    assert.ok(plan.order.includes('jobs'));
   });
 });

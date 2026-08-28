@@ -23,6 +23,25 @@ export type TableRef = {
    * again spends the user's database on the same answer.
    */
   isPartition: boolean;
+  /**
+   * The table this is a partition of, or null when it is not one.
+   *
+   * 🟥 Here because the entity graph is unbuildable without it. Postgres puts
+   * a partitioned table's foreign keys on each PARTITION, and on Pagila the
+   * parent `payment` carries none of its own. A graph that skipped partitions
+   * to avoid a neighbour-per-month lost the relationship, and re-derived it
+   * from the column NAME: something the database enforces, demoted to
+   * something nobody checked. Worse than the noise it was avoiding.
+   *
+   * ⚠️ This comment used to say "54 partitions carrying three constraints
+   * each". It is the THIRD copy of a number that was wrong — there are 55, and
+   * 6 of them declare a FOREIGN KEY — and the two corrected earlier did not
+   * reach it. §4.27 is exactly this: a fence around two copies while a third
+   * sat somewhere nobody was looking. Counted: `field-results` ㉙d.
+   *
+   * One level up, not the whole chain — see the note in `TABLES_SQL`.
+   */
+  partitionOf: { schema: string; table: string } | null;
 };
 
 export type ConstraintKind = 'foreign_key' | 'check' | 'unique' | 'primary_key';
@@ -65,9 +84,39 @@ export type IndexInfo = {
 };
 
 const TABLES_SQL = `
-  SELECT n.nspname AS schema, c.relname AS "table", c.relispartition AS is_partition
+  SELECT
+    n.nspname            AS schema,
+    c.relname            AS "table",
+    c.relispartition     AS is_partition,
+    -- Which table this is a partition OF, when it is one.
+    --
+    -- 🟥 Added 2026-08-28 because the entity graph could not be built without
+    -- it. On Pagila the foreign keys of the partitioned \`payment\` table live on
+    -- PARTITIONS and the parent carries none of its own, so a graph that
+    -- skipped partitions lost the relationship entirely and re-derived it as a
+    -- NAME GUESS — demoting something Postgres enforces to something nobody
+    -- checked, which is worse than the noise that skipping was meant to fix.
+    --
+    -- ⚠️ An earlier version of this comment said "54 partitions, each carrying
+    -- three constraints". Counted properly: **55 partitions, of which 6
+    -- declare a FOREIGN KEY** — \`payment_p2022_01\` through \`_06\`, 18 keys
+    -- between them. The other 49 declare no foreign key. The
+    -- mechanism the comment described was right and the magnitude was wrong by
+    -- 9x, which is §4.1b in one line: a number stated more confidently than it
+    -- was measured. What that 6-of-55 split MEANS is handled in
+    -- \`declaredEdges\`, and it is not a footnote.
+    --
+    -- One level, not the whole chain: \`pg_inherits\` gives the immediate
+    -- parent, and a partition of a partition would resolve to the middle
+    -- table. Said out loud rather than left to be discovered — the fix is a
+    -- recursive walk, and nothing here needs one yet.
+    pn.nspname           AS parent_schema,
+    p.relname            AS parent_table
   FROM pg_class c
   JOIN pg_namespace n ON n.oid = c.relnamespace
+  LEFT JOIN pg_inherits inh ON inh.inhrelid = c.oid AND c.relispartition
+  LEFT JOIN pg_class p       ON p.oid = inh.inhparent
+  LEFT JOIN pg_namespace pn  ON pn.oid = p.relnamespace
   WHERE c.relkind IN ('r', 'p')
     AND n.nspname = ANY($1::text[])
     AND has_table_privilege(c.oid, 'SELECT')
@@ -261,6 +310,10 @@ export async function readSchemaGraph(
       schema: r.schema,
       table: r.table,
       isPartition: r.is_partition === true,
+      partitionOf:
+        r.parent_table === null || r.parent_table === undefined
+          ? null
+          : { schema: r.parent_schema, table: r.parent_table },
     })),
     totalTablesInSchemas: total.rows[0]?.total ?? 0,
     constraints: constraints.rows.map((r) => ({

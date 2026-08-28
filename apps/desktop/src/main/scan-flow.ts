@@ -91,7 +91,7 @@ import { RunHistory, databaseFingerprint, identityFrom, ruleRunsFrom } from '@le
 
 import type { ReportFinding, ScanOutcome, SessionHandle } from '../shared/ipc.js';
 import { SCHEMAS } from './connect-flow.js';
-import { currentPlan, noteObservations } from './profile-flow.js';
+import { currentPlan, noteMap, noteObservations } from './profile-flow.js';
 import { closeSession, dsnFor } from './session.js';
 
 /**
@@ -307,6 +307,12 @@ export async function runScanFlow(handle: unknown): Promise<ScanOutcome> {
      */
     const identity = identityFrom(dsn, scope.database);
     if (identity !== null) {
+      // One set, read by both the shape below and nothing else. Derived rather
+      // than repeated, because the two filters below drifting apart is exactly
+      // what happened when only one of them existed.
+      const partitions = new Set(
+        graph.tables.filter((t) => t.isPartition).map((t) => `${t.schema}.${t.table}`),
+      );
       noteObservations(
         databaseFingerprint(identity),
         {
@@ -315,23 +321,54 @@ export async function runScanFlow(handle: unknown): Promise<ScanOutcome> {
           // NAME alone settle an area would be observing something through a
           // door that stayed shut.
           schemas: scope.schemasGranted,
-          // 🟥 Partitions dropped. Pagila's `payment` has 54 of them, and
+          // 🟥 Partitions dropped. Pagila's `payment` has 55 of them, so
           // without this the window would be told the product saw a payments
-          // table 55 times — one sighting per partition, all of them the same
-          // table wearing a date. A count that inflates with a storage detail
-          // is a count that tells a reader something untrue about their own
+          // table 56 times — one sighting per partition plus the parent, all
+          // of them the same table wearing a date. A count that inflates with
+          // a storage detail tells a reader something untrue about their own
           // system.
+          //
+          // ⚠️ This said "54 of them ... 55 times" until 2026-08-28. It was
+          // the FOURTH copy of one wrong number, and the three corrected
+          // earlier did not reach it — §4.27. Counted: `field-results` ㉙d.
           tables: graph.tables
             .filter((t) => !t.isPartition)
             .map((t) => ({ schema: t.schema, table: t.table })),
-          columns: graph.columns.map((c) => ({
-            schema: c.schema,
-            table: c.table,
-            name: c.name,
-          })),
+          // 🟥 Columns filtered too, and this half was missing until
+          // 2026-08-28. The tables were filtered and the columns were not, so
+          // the guard sat on the path that did not need it — on real Pagila
+          // the partitions are matched by table NAME and produce one sighting
+          // either way — while the path that did was left open.
+          //
+          // Measured on a partitioned table whose partitions carry a matching
+          // COLUMN, which is the ordinary shape for a partitioned events or
+          // payments table: 56 sightings, and the card renders 56 lines of
+          // evidence that are one column wearing month names.
+          //   public.events.stripe_customer_id
+          //   public.events_p2022_01.stripe_customer_id
+          //   ... 54 more
+          columns: graph.columns
+            .filter((c) => !partitions.has(`${c.schema}.${c.table}`))
+            .map((c) => ({ schema: c.schema, table: c.table, name: c.name })),
         },
         new Date().toISOString(),
+        scope.database,
       );
+
+      /**
+       * 🟩 The map — ideal §31. Built from the graph already in hand.
+       *
+       * Costs no query and reads no row: it is foreign keys the database
+       * declared plus column NAMES, which `readSchemaGraph` fetched above for
+       * other reasons entirely. So the map is free on every scan, and there is
+       * no budget argument for skipping it.
+       *
+       * Filed under the same fingerprint as the observations, and after them,
+       * so a database that could not be identified gets neither. A map is a
+       * claim about one system; filed under a guess it would be a claim about
+       * whichever system was scanned next.
+       */
+      noteMap(databaseFingerprint(identity), graph, new Date().toISOString());
     }
 
     const empty = await probeEmptyTables(client, graph.tables);

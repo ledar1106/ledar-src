@@ -32,6 +32,7 @@ import {
   ClaimOrigin,
   Confidence,
   ConfidenceBasis,
+  EdgeTier,
   EgressClass,
   KnowledgeState,
   LANGS,
@@ -100,6 +101,13 @@ const PAIRS: readonly {
   { column: 'profileArea', contract: ProfileArea.options },
   { column: 'knowledgeState', contract: KnowledgeState.options },
   { column: 'areaAnswer', contract: AreaAnswer.options },
+  // 🟥 `edgeTier` matters for the same reason `knowledgeState` does.
+  // `rate_belongs_to_measured` is phrased against the literal 'measured', so a
+  // fourth tier the DDL admitted and that constraint did not name would carry
+  // a match rate with nothing checking it — a counted-looking number on an
+  // edge nobody counted, which is the one thing the tier system exists to
+  // stop.
+  { column: 'edgeTier', contract: EdgeTier.options },
 ];
 
 describe('the store\'s copy of the contract vocabularies', () => {

@@ -14,7 +14,7 @@
 
 import { DatabaseSync } from 'node:sqlite';
 
-import type { Coverage, Evidence, Finding, ProjectProfile } from '@ledar/contracts';
+import type { Coverage, EntityGraph, Evidence, Finding, ProjectProfile } from '@ledar/contracts';
 
 import {
   assertNoCredentials,
@@ -23,6 +23,7 @@ import {
   findingKey,
   structureHash,
 } from './identity.js';
+import { readMap, writeMap } from './map.js';
 import { readProfile, writeProfile } from './profile.js';
 import { SCHEMA_VERSION, STORE_VOCABULARY, applySchema } from './schema.js';
 import {
@@ -965,6 +966,28 @@ export class ScanStore {
    */
   loadProfile(fingerprint: string): ProjectProfile | null {
     return readProfile(this.db, fingerprint);
+  }
+
+  /**
+   * Writes the entity map for one database, replacing whatever it had.
+   *
+   * One map per database — `database_id` is the primary key of `entity_map` —
+   * which is a fact about the FILE rather than a promise made here, and that
+   * matters because this method is not the only thing that can write to it.
+   */
+  saveMap(fingerprint: string, graph: EntityGraph, at: string): void {
+    this.tx(() => writeMap(this.db, fingerprint, graph, at));
+  }
+
+  /**
+   * The map of one database, or null because nobody has built one.
+   *
+   * 🟥 Null is not an empty map, and the two are not interchangeable here.
+   * "This database has no relationships" and "nobody has looked" are opposite
+   * sentences to say to somebody who just inherited a system.
+   */
+  loadMap(fingerprint: string): EntityGraph | null {
+    return readMap(this.db, fingerprint);
   }
 }
 

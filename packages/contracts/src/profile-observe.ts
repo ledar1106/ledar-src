@@ -53,6 +53,20 @@ import type {
  * Postgres. It also keeps this function testable with a literal, which is how
  * every rule below is pinned without a database.
  */
+/**
+ * The three things `observeAreas` reads, and nothing else.
+ *
+ * 🟥 PARTITIONS MUST NOT BE IN HERE — neither as tables nor as the columns
+ * they carry. A partition's columns are copies of its parent's, so one column
+ * arrives once per partition and `strongestFor` keeps every copy. Measured
+ * 2026-08-28 on the ordinary shape of a partitioned events table: **56
+ * sightings and 56 lines of evidence for one column**, differing only by a
+ * month in the table name.
+ *
+ * Said here rather than only at the call site, because the call site had the
+ * filter on `tables` and not on `columns` for two days — the guard was on the
+ * path that did not need it while the path that did was open.
+ */
 export type SchemaShape = {
   readonly schemas: readonly string[];
   readonly tables: readonly { readonly schema: string; readonly table: string }[];
@@ -186,12 +200,47 @@ export function areaOfTable(table: string): ProfileArea | null {
  * reasons to think a system takes payments is a different situation from one,
  * and collapsing them here would throw that away before anybody could see it.
  *
- * `database` is not looked for and never appears. The product is holding an
- * open connection to a Postgres database while this runs, so "is there a
- * database" is answered by the connection rather than by pattern-matching a
- * name — and the caller, which knows which database it is connected to, is
- * the only place that can say WHICH one without guessing.
+ * `database` is not looked for here, and that is not the same as never being
+ * answered. The product is holding an open connection to a Postgres database
+ * while this runs, so the question is settled by the connection rather than by
+ * pattern-matching a name — and only the caller knows WHICH database that is.
+ * `observeConnection` is what the caller adds, and it is not optional: see the
+ * note there for what happened when nothing added it.
  */
+/**
+ * What the open connection settles on its own.
+ *
+ * 🟥 The `database` area cannot be answered by reading names, and for six days
+ * nothing answered it at all. `observeAreas` skipped it with a comment saying
+ * the caller would do it; no caller did. So a person connected LEDAR to
+ * Postgres, watched it scan and write a report about that database, answered
+ * *"yes, PostgreSQL"* to question two of five — and the card came back saying:
+ *
+ * ```text
+ * A database — You said yes. I could not see it.
+ * ```
+ *
+ * Of the five questions that is the one the product is least entitled to be
+ * unsure about. It is connected to the thing. Found by audit 2026-08-28.
+ *
+ * `certain`, because nothing here is inferred: the connection either exists or
+ * this code is not running. The evidence names the database rather than a
+ * table, which is the honest `where` for a fact about the connection itself.
+ */
+export function observeConnection(database: string, observedAt: string): Observation {
+  return {
+    area: 'database',
+    strength: 'certain',
+    evidence: {
+      where: database,
+      why:
+        `LEDAR is connected to a PostgreSQL database called "${database}" right now, ` +
+        `and read its schema to produce this report`,
+      observedAt,
+    },
+  };
+}
+
 export function observeAreas(shape: SchemaShape, observedAt: string): Observation[] {
   const out: Observation[] = [];
 
@@ -320,11 +369,65 @@ export function reconcile(
     const reply = byArea.get(area) ?? null;
     const seen = strongestFor(observations, area);
 
+    /**
+     * 🟥 An agreement a person gave is the one thing on this ladder that
+     * cannot be re-derived, and this function used to throw it away.
+     *
+     * Found by audit 2026-08-28. Every area was rebuilt from `said` and
+     * `observations` and `base.areas` was never read, so the sequence a person
+     * actually performs — confirm, close the app, reopen, scan, answer the
+     * five questions again — demoted `verified` to `observed` and dropped
+     * `confirmedAt` with it. Silently. The next screen just stopped treating a
+     * settled question as settled, and nothing anywhere said why.
+     *
+     * ⚠️ The test that looked like it covered this stopped one call short: it
+     * asserted `verified` survives `noteObservations`, and the real path calls
+     * `saveProfile` next, which is the call that killed it. §4.24.
+     *
+     * ## The two things that DO end an agreement
+     *
+     * ```text
+     * the evidence is gone   they agreed to something specific, and if the
+     *                        column was dropped, keeping `verified` asserts
+     *                        something about a database that no longer has it
+     * they said no           a person contradicting their own confirmation is
+     *                        making an edit, not producing noise for the
+     *                        confirmation to override
+     * ```
+     *
+     * `yes` and `dont_know` do not end it. `yes` agrees with it, and
+     * `dont_know` is the absence of a statement rather than a disagreement —
+     * un-confirming on it would let a hurried skip erase a deliberate act.
+     *
+     * The ORIGINAL evidence and `confirmedAt` are carried through, never
+     * refreshed. What they looked at is what they agreed to, and the contract
+     * says why the date rather than a boolean: an agreement about March is not
+     * an agreement about now.
+     */
+    const held = base.areas[area];
+    if (
+      held !== undefined &&
+      held.state === 'verified' &&
+      seen !== null &&
+      reply?.answer !== 'no'
+    ) {
+      areas[area] = held;
+      continue;
+    }
+
     if (seen !== null) {
+      // What they said travels WITH its content. Keeping the `yes` and
+      // dropping the "Supabase, Stripe" that came with it leaves a screen
+      // saying "you said yes" about nothing in particular — and it is exactly
+      // the half of the profile a person is able to correct.
+      const said = {
+        stated: reply?.answer ?? null,
+        statedPicked: [...(reply?.picked ?? [])],
+      };
       areas[area] =
         seen.strength === 'certain'
-          ? { state: 'observed', evidence: seen.evidence, stated: reply?.answer ?? null }
-          : { state: 'suspected', evidence: seen.evidence, stated: reply?.answer ?? null };
+          ? { state: 'observed', evidence: seen.evidence, ...said }
+          : { state: 'suspected', evidence: seen.evidence, ...said };
       continue;
     }
 

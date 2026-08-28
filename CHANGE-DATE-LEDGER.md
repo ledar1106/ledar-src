@@ -107,6 +107,7 @@ have no Change Date. They are listed here only so the boundary stays visible.
 | `apps/engine` | Apache 2.0 | created 2026-08-22 · not on npm |
 | `packages/model-client` | Apache 2.0 | source public since 2026-08-25 · not on npm |
 | `packages/rule-runner` | Apache 2.0 | created 2026-08-25 · not on npm |
+| `apps/desktop` | Apache 2.0 | created 2026-08-26 · source public since 2026-08-27 (Licensor's decision; first push 2026-08-28) · not on npm — the shell is what holds a user's DSN, so whoever owns the data can read the code that touches it |
 
 > Wildcards used to stand in this table — `packages/connector-*`,
 > `packages/packs-*` — each marked *does not exist yet*. All seven existed by

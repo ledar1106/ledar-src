@@ -350,6 +350,19 @@ export type AreaFacts = {
   readonly evidence: readonly { readonly where: string; readonly why: string }[];
   /** What the person said about this area, or null if they have not. */
   readonly stated: AreaAnswer | null;
+  /**
+   * What they picked from the list when they said yes, in their words.
+   *
+   * 🟥 Empty until 2026-08-28 because it never left the contract, and it is
+   * the half of a profile a person can actually correct: "you said yes" with
+   * no record of what they said yes ABOUT is not something anybody can look at
+   * and disagree with. §24 says a profile is meant to be edited.
+   *
+   * Empty on `verified` for the same reason `stated` is null there — the
+   * agreement supersedes the answer — and on `unknown`, where nothing was
+   * said at all.
+   */
+  readonly statedPicked: readonly string[];
 };
 
 /**
@@ -391,7 +404,22 @@ export type LedarBridge = {
    * observations live, and a renderer that could assemble a profile could
    * assemble one that was never measured.
    */
-  saveProfile(replies: readonly AreaReply[]): Promise<ProfileFacts>;
+  /**
+   * 🟥 `null` when no scan has happened, and the type has to say so.
+   *
+   * It said `Promise<ProfileFacts>` until 2026-08-28 while the handler
+   * returned `ProfileFacts | null`, so the window was told a case could not
+   * arise that arises whenever answers are sent before a database has been
+   * read. `ipcMain.handle` RESOLVES with null — it does not reject — so the
+   * null went straight into the success path, the "here is your map" bubble
+   * was built, and only then did drawing the cards throw. A person got an
+   * empty map followed by a message saying the map could not be built.
+   *
+   * The answers are about a database. Until one has been read there is
+   * nothing for them to be about, and that is a real state rather than an
+   * error to dress up.
+   */
+  saveProfile(replies: readonly AreaReply[]): Promise<ProfileFacts | null>;
   /**
    * The person looked at what was found for one area and agreed.
    *
@@ -399,7 +427,7 @@ export type LedarBridge = {
    * human signed it, every later screen reads it as settled, and nothing but
    * a person pressing this may produce it.
    */
-  confirmArea(area: ProfileArea): Promise<ProfileFacts>;
+  confirmArea(area: ProfileArea): Promise<ProfileFacts | null>;
   devPrefill(): Promise<DevPrefill>;
   devReport(line: string): void;
 };

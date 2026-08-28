@@ -297,6 +297,11 @@ export const en = {
   'profile.said.yes': 'You said: yes.',
   'profile.said.no': 'You said: no.',
   'profile.said.dont_know': 'You said you did not know, and asked me to find out.',
+  // 🟥 What they said yes ABOUT. Held by the contract since the questions
+  // were written and shown to nobody until 2026-08-28 — so the card said
+  // "You said: yes" and a person had no way to see, or correct, the answer
+  // the product was actually holding. §24: a profile is meant to be edited.
+  'profile.said.picked': 'You picked: {items}.',
 
   'profile.evidence.heading': 'Where I saw it',
   'profile.confirm': 'Yes, that is right',

@@ -39,12 +39,16 @@ import {
   ProfileArea,
   conflictsIn,
   emptyProfile,
+  graphFrom,
   observeAreas,
+  observeConnection,
   reconcile,
   scanPlanFrom,
 } from '@ledar/contracts';
 import type {
   AreaKnowledge,
+  EntityGraph,
+  GraphSource,
   Observation,
   ProjectProfile,
   ScanPlan,
@@ -70,6 +74,31 @@ import type { AreaFacts, AreaReply, ProfileFacts } from '../shared/ipc.js';
 let seen: readonly Observation[] = [];
 let fingerprint: string | null = null;
 let profile: ProjectProfile | null = null;
+/**
+ * This database's map, for the life of the window.
+ *
+ * Beside `profile` rather than inside it: the profile is what a PERSON said
+ * and what the schema showed about five areas, and it is persisted. The map is
+ * derived wholly from a scan with nobody's opinion in it, so folding it in
+ * would put a re-derivable thing inside the one record this product treats as
+ * a person's own words.
+ */
+let map: EntityGraph | null = null;
+/**
+ * Which database `map` is of.
+ *
+ * 🟥 Its own field rather than leaning on `fingerprint`, because the first
+ * draft did lean on it and had a hole: `noteMap` set the map without setting
+ * `fingerprint`, so a map built for database A survived into a session about
+ * database B — `noteObservations` checked `fingerprint`, found it null, and
+ * cleared nothing. A person would then have been shown A's relationships under
+ * B's name, which is the worst thing this file could produce: not an error, a
+ * confident wrong answer.
+ *
+ * The map carries its own identity so the two can never disagree about which
+ * system they describe.
+ */
+let mapFor: string | null = null;
 
 /**
  * Opens the history, does one thing, and closes it.
@@ -130,8 +159,25 @@ export function noteObservations(
   databaseFingerprint: string,
   shape: SchemaShape,
   at: string,
+  /**
+   * The database this window is connected to.
+   *
+   * 🟥 Required, not optional. `observeAreas` cannot settle the `database`
+   * area by reading names and says so; for six days nothing settled it at all,
+   * and a person who had just watched LEDAR scan their Postgres was told *"you
+   * said yes, I could not see it"* about the database it was connected to.
+   * Optional here would let the same silence come back the first time somebody
+   * added a second caller.
+   */
+  connectedTo: string,
 ): void {
-  seen = observeAreas(shape, at);
+  // A different database means a different map. Checked against the map's OWN
+  // fingerprint, not the session's — see `mapFor`.
+  if (mapFor !== null && mapFor !== databaseFingerprint) {
+    map = null;
+    mapFor = null;
+  }
+  seen = [observeConnection(connectedTo, at), ...observeAreas(shape, at)];
   fingerprint = databaseFingerprint;
   // A fresh scan of a different database starts a fresh map. Keeping the old
   // one would let answers about one system be reconciled against sightings
@@ -146,6 +192,73 @@ export function noteObservations(
   // than the file, because it is the one the person has been editing.
   profile ??= withStore((store) => store.loadProfile(databaseFingerprint)) ?? null;
   profile ??= emptyProfile(databaseFingerprint, at);
+
+  // The map from the last time anybody scanned this database — the other half
+  // of §45. Loaded only when this session has none, because a map in hand came
+  // from a scan that just ran and the stored one is older by definition.
+  //
+  // ⚠️ This is the ONLY path by which a map outlives the window that built it,
+  // and it runs before the scan finishes. So what a person sees during a scan
+  // is the PREVIOUS map until `noteMap` replaces it — which is right (the map
+  // is not half-built and shown) and is worth knowing, because it means a
+  // freshly dropped foreign key is still on screen until the scan completes.
+  if (map === null) {
+    const stored = withStore((store) => store.loadMap(databaseFingerprint)) ?? null;
+    if (stored !== null) {
+      map = stored;
+      mapFor = databaseFingerprint;
+    }
+  }
+}
+
+/**
+ * Called by the scan with the graph it already read.
+ *
+ * 🟥 Separate from `noteObservations`, which takes a `SchemaShape` — the three
+ * fields `observeAreas` needs and nothing more. The map needs constraints and
+ * partition parentage too, so widening that parameter would have handed a pure
+ * function a connection's worth of detail to justify one caller. Two callers,
+ * two shapes, one scan.
+ *
+ * It costs no query. Everything here came out of `readSchemaGraph`, which the
+ * scan runs regardless, so building the map touches nobody's database a second
+ * time and cannot slow one down.
+ */
+export function noteMap(databaseFingerprint: string, source: GraphSource, at: string): void {
+  // 🟥 A map naming a database this session is not about is REFUSED, not
+  // stored and filtered on the way out. Storing it would put another system's
+  // relationships in this process for something later to find, and the whole
+  // point of the check is that they should not be here at all.
+  if (fingerprint !== null && fingerprint !== databaseFingerprint) return;
+  map = graphFrom(source);
+  mapFor = databaseFingerprint;
+
+  // 🟩 Ideal §45. Written for the same reason the profile is, and silently for
+  // the same reason: a map that failed to save is rebuilt by the next scan at
+  // no cost, so throwing here would lose a report measured from a real
+  // database to protect a file that owes it nothing.
+  withStore((store) => {
+    store.saveMap(databaseFingerprint, map!, at);
+  });
+}
+
+/**
+ * The map of this database, or `null` before a scan has read one.
+ *
+ * ⚠️ Rebuilt from each scan and held for the window's life — it is NOT yet
+ * memory in the sense ideal §45 means. Free to rebuild, because it is derived
+ * from a read the scan does anyway; the reason to persist it is to answer a
+ * question WITHOUT scanning, and that is what G3 needs rather than what G2
+ * delivers. Written down here so the gap is a decision with a date on it and
+ * not something discovered later by someone expecting it to be there.
+ */
+export function currentMap(): EntityGraph | null {
+  // No filtering here on purpose. A wrong-database map is refused by `noteMap`
+  // and dropped by `noteObservations`, so if one were still standing at this
+  // point a check here would only hide it — and hiding it is what let both
+  // guards pass their tests while neither was doing anything provable. Every
+  // guard now sits where its absence changes what this returns.
+  return map;
 }
 
 /** Drops everything, when the window's session ends. */
@@ -153,6 +266,8 @@ export function forgetObservations(): void {
   seen = [];
   fingerprint = null;
   profile = null;
+  map = null;
+  mapFor = null;
 }
 
 /**
@@ -192,7 +307,15 @@ export function confirmArea(area: ProfileArea, at: string): ProfileFacts | null 
   if (profile === null) return null;
 
   const known = profile.areas[area];
-  if (known === undefined) return factsOf(profile);
+  // 🟥 Only a rung that was SEEN can be confirmed, and the map is returned
+  // unchanged rather than throwing: a confirm button for an area that cannot
+  // be confirmed should not exist, so arriving here means the window and the
+  // profile disagree, and the profile is the one that is right.
+  //
+  // The `known === undefined` branch that used to sit above this is gone —
+  // `areas` is a closed object over the five now, so the case cannot arise and
+  // a branch for it would look like a considered decision about a state that
+  // does not exist.
   if (known.state !== 'observed' && known.state !== 'suspected') return factsOf(profile);
 
   const promoted: AreaKnowledge = {
@@ -241,12 +364,21 @@ export function currentFacts(): ProfileFacts | null {
  */
 function factsOf(p: ProjectProfile): ProfileFacts {
   const areas: AreaFacts[] = PROFILE_AREAS.map((area) => {
-    const known = p.areas[area] ?? { state: 'unknown' as const };
+    // No fallback, same reason as `scanPlanFrom`: `areas` is closed over the
+    // five, and manufacturing an `unknown` for a missing one would report
+    // "nobody has been asked about this" about an area that went missing.
+    const known = p.areas[area];
     switch (known.state) {
       case 'unknown':
-        return { area, state: known.state, evidence: [], stated: null };
+        return { area, state: known.state, evidence: [], stated: null, statedPicked: [] };
       case 'stated':
-        return { area, state: known.state, evidence: [], stated: known.answer };
+        return {
+          area,
+          state: known.state,
+          evidence: [],
+          stated: known.answer,
+          statedPicked: known.picked,
+        };
       case 'suspected':
       case 'observed':
         return {
@@ -254,6 +386,7 @@ function factsOf(p: ProjectProfile): ProfileFacts {
           state: known.state,
           evidence: known.evidence.map((e) => ({ where: e.where, why: e.why })),
           stated: known.stated,
+          statedPicked: known.statedPicked,
         };
       case 'verified':
         // The person agreed, so what they originally said is no longer the
@@ -264,6 +397,7 @@ function factsOf(p: ProjectProfile): ProfileFacts {
           state: known.state,
           evidence: known.evidence.map((e) => ({ where: e.where, why: e.why })),
           stated: null,
+          statedPicked: [],
         };
     }
   });

@@ -176,9 +176,9 @@ export function writeProfile(db: DatabaseSync, profile: ProjectProfile): void {
   const insert = db.prepare(
     `
     INSERT INTO project_profile_area (
-      database_id, area, state, answer, picked_json, evidence_json,
+      database_id, area, state, answer, picked_json, evidence_json, stated_picked_json,
       stated_answer, confirmed_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
   );
 
@@ -194,7 +194,7 @@ export function writeProfile(db: DatabaseSync, profile: ProjectProfile): void {
     // constraint that would have named the column ever runs.
     switch (known.state) {
       case 'unknown':
-        insert.run(databaseId, area, 'unknown', null, null, null, null, null);
+        insert.run(databaseId, area, 'unknown', null, null, null, null, null, null);
         break;
 
       case 'stated':
@@ -209,6 +209,10 @@ export function writeProfile(db: DatabaseSync, profile: ProjectProfile): void {
           // byte for byte and one that did not is stored as the contract
           // would have read it.
           JSON.stringify(known.picked ?? []),
+          null,
+          // `stated_picked_json` is the SIGHTING rungs' column and is null on
+          // this one. Two columns for one vocabulary, exactly as `answer` and
+          // `stated_answer` are, so the union CHECKs can tell the rungs apart.
           null,
           null,
           null,
@@ -225,6 +229,10 @@ export function writeProfile(db: DatabaseSync, profile: ProjectProfile): void {
           null,
           null,
           JSON.stringify(known.evidence),
+          // The picks that came with `stated`. `?? []` reproduces the
+          // contract's own `.default([])`, the same way the `stated` rung does
+          // above — an absent list IS the empty list there.
+          JSON.stringify(known.statedPicked ?? []),
           // `known.stated` is nullable and the null is load-bearing: it means
           // the person was never asked about an area the scan found something
           // in. Passed through, never coalesced.
@@ -242,6 +250,7 @@ export function writeProfile(db: DatabaseSync, profile: ProjectProfile): void {
           null,
           null,
           JSON.stringify(known.evidence),
+          null,
           null,
           known.confirmedAt,
         );
@@ -334,6 +343,12 @@ function knowledgeFrom(row: Row, area: string): AreaKnowledge {
         // nobody was asked; reading it back as 'dont_know' would turn a
         // question never put to anybody into an answer they gave.
         stated: textOrNull(row, 'stated_answer') as AreaAnswer | null,
+        // A null here is a file written before this column existed, not a
+        // person who picked nothing. Both read back as the empty list, which
+        // is what the contract's `.default([])` says the absence means — the
+        // distinction the line above protects does not apply, because there is
+        // no answer to fabricate, only an empty list either way.
+        statedPicked: json<string[]>(textOrNull(row, 'stated_picked_json') ?? '[]', 'stated_picked_json'),
       };
 
     case 'verified':

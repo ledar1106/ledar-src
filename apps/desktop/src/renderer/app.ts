@@ -1037,6 +1037,16 @@ function requestProfile(replies: readonly AreaReply[]): void {
   void window.ledar
     .saveProfile(replies)
     .then((facts) => {
+      // 🟥 Null means no database has been read, so there is nothing for these
+      // answers to be about. Handled BEFORE anything is drawn, which is the
+      // whole repair: `ipcMain.handle` resolves with null rather than
+      // rejecting, so this used to reach `renderProfile`, build the "here is
+      // your map" bubble, and only then throw on the empty cards. A person got
+      // an empty map followed by a message saying the map could not be built.
+      if (facts === null) {
+        profileUnavailable();
+        return;
+      }
       renderProfile(facts, null);
       announce(t('announce.profile'));
     })
@@ -1045,14 +1055,7 @@ function requestProfile(replies: readonly AreaReply[]): void {
       // written from the database before any of this ran, and what the person
       // said is still in the turns where they said it. So the sentence says
       // what was lost and nothing more alarming than that.
-      //
-      // A map that could not be built because nothing has been scanned lands
-      // here too. `saveProfile` on the contract promises a `ProfileFacts` and
-      // has no way to say *there is nothing for these answers to be about*,
-      // so the main side's way of saying it arrives as a value this window
-      // cannot read — which is a failure, and is reported as one.
-      addTurn('assistant').append(el('p', undefined, t('profile.unavailable')));
-      chat.scrollTop = chat.scrollHeight;
+      profileUnavailable();
     })
     .finally(() => {
       profileInFlight = false;
@@ -1068,6 +1071,12 @@ function requestProfile(replies: readonly AreaReply[]): void {
  * without this, a keyboard user's focus falls to the top of the document and
  * they have to find their place again.
  */
+/** One sentence, said the same way whether the map failed or never applied. */
+function profileUnavailable(): void {
+  addTurn('assistant').append(el('p', undefined, t('profile.unavailable')));
+  chat.scrollTop = chat.scrollHeight;
+}
+
 function renderProfile(facts: ProfileFacts, refocus: ProfileArea | null): void {
   profileFacts = facts;
 
@@ -1160,6 +1169,15 @@ function areaCard(area: AreaFacts): HTMLElement {
   // contract says which — nothing here reads a meaning out of the absence.
   if (area.stated !== null) card.append(el('p', 'meta', t(`profile.said.${area.stated}`)));
 
+  // What they picked, beside what they answered. Joined here rather than in
+  // the catalogue because a list is a list in every language and the separator
+  // is not the sentence — the sentence is the key above.
+  if (area.statedPicked.length > 0) {
+    card.append(
+      el('p', 'meta', t('profile.said.picked', { items: area.statedPicked.join(', ') })),
+    );
+  }
+
   if (area.evidence.length > 0) card.append(evidenceBlock(area.evidence));
 
   if (shape.confirmable) {
@@ -1216,6 +1234,14 @@ function confirmButton(area: ProfileArea): HTMLButtonElement {
     void window.ledar
       .confirmArea(area)
       .then((facts) => {
+        // Same null, same reason. A confirmation can only be about a map, and
+        // a window with no map has nothing to redraw.
+        if (facts === null) {
+          announce(t('profile.confirm.failed'));
+          addTurn('assistant').append(el('p', undefined, t('profile.confirm.failed')));
+          chat.scrollTop = chat.scrollHeight;
+          return;
+        }
         renderProfile(facts, area);
         announce(t('announce.profile.confirmed', { area: t(`profile.area.${area}`) }));
       })
