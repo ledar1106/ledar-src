@@ -16,17 +16,19 @@ import { readFile } from 'node:fs/promises';
 import { protocol } from 'electron';
 
 import { APP_HOST, CSP, mimeFor, resolveAppPath } from './serve-paths.js';
+import type { Layout } from './serve-paths.js';
 
 export { APP_HOST, APP_ORIGIN, CSP } from './serve-paths.js';
+export type { Layout } from './serve-paths.js';
 
-export function registerAppProtocol(packageRoot: string): void {
+export function registerAppProtocol(packageRoot: string, layout: Layout): void {
   protocol.handle('app', async (request) => {
     const refuse = (status: number): Response => new Response(null, { status });
     try {
       const url = new URL(request.url);
       if (url.host !== APP_HOST) return refuse(404);
 
-      const file = resolveAppPath(packageRoot, decodeURIComponent(url.pathname));
+      const file = resolveAppPath(packageRoot, decodeURIComponent(url.pathname), layout);
       if (file === null) return refuse(404);
 
       const type = mimeFor(file);

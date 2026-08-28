@@ -1,6 +1,6 @@
 {
   "name": "@ledar/desktop",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "private": true,
   "description": "The LEDAR desktop shell: an Electron window over the same packages the CLI calls.",
   "license": "Apache-2.0",

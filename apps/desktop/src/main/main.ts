@@ -24,13 +24,42 @@ import { devPrefill } from './dev.js';
 import { registerIpc } from './ipc.js';
 import { hardenAllWebContents } from './security.js';
 import { APP_ORIGIN, registerAppProtocol } from './serve.js';
+import type { Layout } from './serve.js';
 import { forgetObservations } from './profile-flow.js';
 import { closeAllSessions } from './session.js';
 
-const HERE = dirname(fileURLToPath(import.meta.url)); // .../dist/node/main
-const PACKAGE_ROOT = resolve(HERE, '..', '..', '..'); // .../apps/desktop
+/**
+ * The two builds, and the single fact that tells them apart.
+ *
+ * `app.isPackaged` is Electron's own answer to "was this launched as
+ * `electron <dir>` or as an installed executable". It is deliberately the
+ * only input here: the alternative — probing the disk for whichever tree
+ * happens to exist — would answer correctly on the development machine for
+ * the same reason it would be useless there, and the MSIX handbook's second
+ * conclusion is that a check which uses the build machine as evidence
+ * proves nothing about anyone else's.
+ *
+ * ```text
+ *              main entry                          package root
+ * dev          apps/desktop/dist/node/main/main.js  apps/desktop
+ * packaged     resources/app/main.js                resources/app
+ * ```
+ *
+ * In the packaged tree the main process is ONE bundled file with its preload
+ * and its `ui/` directory beside it, so the root is simply the directory the
+ * bundle is in. That flatness is not tidiness: bundling is what removes the
+ * need for `--conditions=ledar-built`, which is the condition Windows strips
+ * out of `NODE_OPTIONS` in a packaged app. See infra/pack-msix/build.mjs.
+ */
+const LAYOUT: Layout = app.isPackaged ? 'packaged' : 'dev';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const PACKAGE_ROOT = LAYOUT === 'packaged' ? HERE : resolve(HERE, '..', '..', '..');
 const REPO_ROOT = resolve(PACKAGE_ROOT, '..', '..');
-const PRELOAD = join(HERE, '..', 'preload', 'preload.cjs');
+const PRELOAD =
+  LAYOUT === 'packaged'
+    ? join(HERE, 'preload.cjs')
+    : join(HERE, '..', 'preload', 'preload.cjs');
 
 // Must run before app ready; a scheme registered later is not "standard"
 // and the window would fall back to an opaque origin.
@@ -118,7 +147,7 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   void app.whenReady().then(() => {
-    registerAppProtocol(PACKAGE_ROOT);
+    registerAppProtocol(PACKAGE_ROOT, LAYOUT);
     createWindow();
   });
 }
