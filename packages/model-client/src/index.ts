@@ -46,8 +46,14 @@
 
 import {
   checkEgress,
+  framePrompt,
+  lookupPromptParts,
+  mergeOutside,
+  narrowOffer,
   sealAnswer,
   sealLookup,
+  subjectPromptParts,
+  subjectsOnly,
   type EgressClass,
   type EgressPermit,
   type EvidenceFact,
@@ -56,6 +62,7 @@ import {
   type PermitLedger,
   type SealedAnswer,
   type SealedLookup,
+  type PromptParts,
   type SealedPrompt,
 } from '@ledar/contracts';
 
@@ -471,4 +478,159 @@ export async function askLookup(
     options,
   );
   return out.state === 'answered' ? { state: 'answered', lookup: out.value } : out;
+}
+
+/**
+ * What the caller must supply for EACH round: a permit over that round's
+ * exact bytes.
+ *
+ * 🟥 A factory, not a permit. `grantEgress` hashes the body, and the two
+ * rounds send two different bodies — the second one cannot even be built
+ * until the first has answered. A single permit reused across both would
+ * either fail `checkEgress` on the second call or, if the hash were dropped
+ * to make it work, would be a permit that authorised bytes nobody had seen.
+ * The awkwardness of this signature is the permit doing its job.
+ *
+ * ⚠️ It hands over BOTH the parts and the sealed prompt, and the first version
+ * passed only the prompt. `describeEgress` reads the parts to work out the
+ * data class, so with the sealed text alone every caller would build a
+ * disclosure saying `product-constant` — and `checkEgress` would refuse its
+ * own permit at the moment of sending. A test found it; a caller would have
+ * found it too, and later.
+ */
+export type GrantForRound = (round: 1 | 2, parts: PromptParts, prompt: SealedPrompt) => Egress;
+
+/**
+ * Choose a subject, then choose routes from that subject's routes alone.
+ *
+ * ## Why this is two calls
+ *
+ * N60, measured on a 368-table schema: the SUBJECTS block is 3,324 tokens and
+ * the ROUTES block is 507,826. No model takes the second number, so G3 did not
+ * run on a real-sized schema at all — and 99.6% of those routes leave subjects
+ * the question is not about. Narrowed to one subject the worst case is 2,826
+ * tokens.
+ *
+ * Two cheaper shapes were costed and both died on the numbers: `declared`
+ * edges only saves 2.9% (97% of that schema's edges are foreign keys), and
+ * one-hop routes only fits but drops 54% of the map, including the
+ * `customer → rental → payment` chain that is ideal §33's own example.
+ *
+ * ## 🟥 What two rounds cost, said plainly
+ *
+ * Two calls, two prices, two latencies, and **a second place to be wrong**. A
+ * subject chosen badly in round one cannot be recovered in round two — round
+ * two is only shown that subject's routes, by construction. That is a real
+ * loss against the single call, which at least let one decision see
+ * everything. It buys the only thing that matters more: on a real schema the
+ * single call cannot be made at all.
+ */
+export async function askLookupInTwoRounds(
+  config: ModelConfig,
+  tierName: string,
+  question: string,
+  offer: LookupOffer,
+  record: (call: CallRecord) => void,
+  grant: GrantForRound,
+  options: AskOptions = {},
+): Promise<Looked> {
+  // 🟥 The FULL offer builds the prompt; the subjects-only offer is what the
+  // answer is sealed against. Those are two different jobs and passing the
+  // narrowed one to both looks tidier and is wrong: the hints — "links to
+  // payment, rental; 9 routes" — are derived from `offer.paths`, so with the
+  // stripped offer they came out empty and round one chose from bare table
+  // names. Measured, justified, and silently not sent. A test found it.
+  const firstParts = subjectPromptParts(question, offer);
+  const first = framePrompt(firstParts);
+  const round1 = await askLookup(
+    config,
+    tierName,
+    first,
+    // Sealed against the SUBJECTS-only menu, so `follow` is refused rather
+    // than asked not to be filled in: the offer has no paths, so any id there
+    // is an id that was never offered.
+    subjectsOnly(offer),
+    record,
+    grant(1, firstParts, first),
+    options,
+  );
+  if (round1.state !== 'answered') return round1;
+
+  // A round that decided the database cannot answer has finished. Asking it to
+  // pick routes anyway would be this product overriding an admission it just
+  // asked for.
+  //
+  // ⚠️ `!answerable` here is UNREACHABLE, and that is worth writing down rather
+  // than leaving for the next reader to rediscover. A mutation run removed it
+  // and nothing went red, which normally means a check nobody has checked —
+  // but here it means something stronger: `round1.lookup` is a `SealedLookup`,
+  // and `sealLookup` already refuses `answerable: false` with a subject
+  // attached. So the two clauses cannot disagree, and the second alone decides.
+  //
+  // Kept because it states the intent at the place the decision is made. A
+  // reader of this line should not have to know the seal's rules to see why a
+  // refusal stops here.
+  if (!round1.lookup.answerable || round1.lookup.subject === null) return round1;
+
+  const narrowed = narrowOffer(offer, round1.lookup.subject);
+  const secondParts = lookupPromptParts(question, narrowed);
+  const second = framePrompt(secondParts);
+  const round2 = await askLookup(
+    config,
+    tierName,
+    second,
+    narrowed,
+    record,
+    grant(2, secondParts, second),
+    options,
+  );
+  if (round2.state !== 'answered') return round2;
+
+  // 🟥 Round two is allowed to change its mind, and saying so is not the same
+  // as failing. Looking at the actual routes it may see that none of them
+  // reaches the question — and the merge below would then produce
+  // `answerable: false` with round one's subject still attached, which
+  // `sealLookup` refuses outright as *"two different answers"*. Correctly:
+  // that pairing IS incoherent. But turning a considered refusal into a dead
+  // call would throw away the one thing a refusal carries, which is what it
+  // says is outside, from BOTH rounds.
+  if (!round2.lookup.answerable) {
+    return {
+      state: 'answered',
+      lookup: sealLookup(
+        {
+          answerable: false,
+          subject: null,
+          follow: [],
+          outside: mergeOutside(round1.lookup.outside, round2.lookup.outside),
+        },
+        narrowed,
+      ),
+    };
+  }
+
+  // 🟥 Re-sealed rather than returned, because the value that leaves here is
+  // not what either round said on its own: the subject is round one's and the
+  // admissions are the union of both. Building that object and handing it out
+  // as if it had been checked would be a `SealedLookup` nobody sealed — the
+  // exact hole the brand exists to make impossible.
+  const merged = sealLookup(
+    {
+      answerable: round2.lookup.answerable,
+      // ⚠️ Round one's, and — like the `!answerable` clause above — a mutation
+      // run showed this cannot differ from round two's. The narrowed offer
+      // holds exactly one subject; `sealLookup` refuses any other id and
+      // refuses `answerable: true` with none; and this line is only reached
+      // when round two is answerable. So round two's subject IS round one's,
+      // provably rather than usually.
+      //
+      // Round one's is still what is read, because round one is the round
+      // that chose. Reading round two's would be depending on an echo.
+      subject: round1.lookup.subject,
+      follow: round2.lookup.follow,
+      outside: mergeOutside(round1.lookup.outside, round2.lookup.outside),
+    },
+    narrowed,
+  );
+  return { state: 'answered', lookup: merged };
 }

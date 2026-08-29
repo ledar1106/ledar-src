@@ -348,6 +348,168 @@ export function resolveLookup(
 }
 
 /**
+ * The menu with its routes removed, for the first of two rounds.
+ *
+ * ## 🟥 Why there are two rounds now
+ *
+ * N60, measured on a real 368-table schema:
+ *
+ * ```text
+ *   the SUBJECTS block alone      368 lines ·    13,294 bytes ≈   3,324 tokens
+ *   the ROUTES block alone     24,174 lines · 2,031,303 bytes ≈ 507,826 tokens
+ * ```
+ *
+ * The routes ARE the two megabytes, and 99.6% of them are routes leaving
+ * subjects the question is not about. A question concerns ONE subject; the
+ * menu was sending every route from all 368.
+ *
+ * Two cheaper-sounding shapes were costed first and both were ruled out by
+ * the numbers rather than by argument. Sending only `declared` edges saves
+ * **2.9%** — 97% of that schema's edges are foreign keys, so the thrifty
+ * option removes nothing. Sending only one-hop routes fits, and drops 54% of
+ * the map, including `customer → rental → payment`, which is the example in
+ * ideal §33 and the only shape G3 has ever demonstrated.
+ *
+ * So the model picks a subject from a list that fits, and is then shown the
+ * routes leaving THAT subject, which also fits — 161 routes at the worst
+ * subject on that schema, 2,826 tokens.
+ */
+export function subjectsOnly(offer: LookupOffer): LookupOffer {
+  return { subjects: offer.subjects, paths: [] };
+}
+
+/**
+ * The menu narrowed to one subject and the routes that leave it.
+ *
+ * 🟩 A side effect worth naming: `sealLookup` checks `follow` ids against the
+ * offer's path ids, and against the WHOLE menu a choice of `subject: s6` with
+ * `follow: ["s12.p1"]` passes the seal — `resolveLookup` is what catches it,
+ * one layer later, on its way to building a query. Narrowed, the other
+ * subject's routes are not in the offer at all, so the same mistake becomes
+ * unbuildable at the earlier gate. A narrower menu is a stricter seal.
+ *
+ * Ids are not renumbered. `s6.p3` stays `s6.p3`, because the ids in a
+ * transcript, a permit and a stored answer have to mean the same thing in
+ * every round — renumbering per round would make two rounds' logs describe
+ * different maps in the same words.
+ */
+export function narrowOffer(offer: LookupOffer, subjectId: string): LookupOffer {
+  const subject = offer.subjects.find((s) => s.id === subjectId);
+  if (subject === undefined) {
+    throw new LookupRefused(
+      `Cannot narrow the menu to ${JSON.stringify(subjectId)}: no such subject. ` +
+        `The second round would then offer no routes at all, and a model asked ` +
+        `to choose from an empty list answers something, which is worse than ` +
+        `this failing here.`,
+    );
+  }
+  return {
+    subjects: [subject],
+    paths: offer.paths.filter((p) => p.id.startsWith(`${subjectId}.`)),
+  };
+}
+
+/**
+ * Round one's prompt: which subject, and nothing about routes.
+ *
+ * ⚠️ The worry about asking for a subject first is that the model chooses
+ * blind — with the whole menu it could see that `customer` reaches `payment`
+ * and `rental`, and picking from bare table names throws that away. So each
+ * subject carries the names of a few tables it links to and how many routes
+ * leave it. Measured on the 368-table schema that is 31,146 bytes against
+ * 13,294 for bare names: 7,787 tokens instead of 3,324, and both fit, so the
+ * information is worth more than the bytes.
+ *
+ * 🟥 Give this the WHOLE offer, not `subjectsOnly(offer)`. The hints come off
+ * `offer.paths`, so a stripped offer produces subjects with no hints at all —
+ * which is the failure this function exists to avoid, arriving quietly and
+ * looking like a formatting choice. The stripped offer is for the SEAL, and
+ * the two jobs are separate: the model is shown what each subject connects
+ * to, and may still not name a route.
+ *
+ * 🟥 It says `follow: []` and means it. The offer this round is SEALED against
+ * has no paths, so `sealLookup` refuses any id the model puts there — the
+ * instruction and the gate agree because one is checked against an empty
+ * list, not because the wording was careful.
+ */
+export function subjectPromptParts(question: string, offer: LookupOffer): PromptParts {
+  const oneHop = new Map<string, string[]>();
+  const routesFrom = new Map<string, number>();
+  for (const p of offer.paths) {
+    routesFrom.set(p.from, (routesFrom.get(p.from) ?? 0) + 1);
+    if (p.path.length !== 1) continue;
+    const near = oneHop.get(p.from) ?? [];
+    if (near.length < 4) near.push(p.to.slice(p.to.indexOf('.') + 1));
+    oneHop.set(p.from, near);
+  }
+
+  const subjects = offer.subjects
+    .map((s) => {
+      const name = refOf(s.entity);
+      const near = oneHop.get(name) ?? [];
+      const total = routesFrom.get(name) ?? 0;
+      return near.length === 0
+        ? `${s.id} = ${name}`
+        : `${s.id} = ${name} (links to ${near.join(', ')}; ${total} routes)`;
+    })
+    .join('\n');
+
+  return {
+    instruction: [
+      'Choose WHICH TABLE this question is about. Answer using ONLY this JSON',
+      'shape, no prose, no extra keys.',
+      '',
+      '  {',
+      '    "answerable": boolean,',
+      '    "subject": string | null,',
+      '    "follow": [],',
+      '    "outside": string[]',
+      '  }',
+      '',
+      '- `subject`: ONE id from the SUBJECTS list. Never a table name.',
+      '- `follow`: leave EMPTY. You will be shown this subject’s routes next',
+      '  and asked to choose from them.',
+      '- `outside`: what this question needs that a database does not hold.',
+      `  Only these values: ${OUTSIDE_KINDS.join(', ')}`,
+      '',
+      'Most real questions are part database and part something else. Naming',
+      'what is outside is expected, not a failure — say `answerable: true` and',
+      'list it. Use `answerable: false` only when the database cannot be aimed',
+      'at the question at all, and then name nothing to look at.',
+    ].join('\n'),
+    untrusted: [
+      {
+        label: 'the question',
+        egressClass: 'customer-system-metadata',
+        content: question,
+      },
+      {
+        label: 'SUBJECTS you may choose from',
+        egressClass: 'customer-system-metadata',
+        content: subjects,
+      },
+    ],
+  };
+}
+
+/**
+ * Merges what both rounds admitted is outside the database.
+ *
+ * 🟥 A union, never the second round's answer alone. Round one sees the
+ * question with no routes in front of it and is the round most likely to say
+ * *"this needs the mail provider"*; round two is looking at a list of joins
+ * and may well forget. Taking only the later answer would let an admission
+ * that was already made go missing — and the Admit half of ideal §1 is the
+ * half ㉜d measured breaking on its own, with nobody attacking anything.
+ */
+export function mergeOutside(
+  first: readonly OutsideKind[],
+  second: readonly OutsideKind[],
+): OutsideKind[] {
+  return [...new Set([...first, ...second])];
+}
+
+/**
  * The prompt for a lookup: the menu, the question, and the shape to answer in.
  *
  * 🟥 It lives beside `sealLookup` rather than at a call site, and that is a
