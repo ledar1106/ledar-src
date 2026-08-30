@@ -51,6 +51,7 @@ import {
 import type { AnswerResult, Interview } from './interview.js';
 import { EVERY_RUNG, shapeForDirection, shapeForRung } from './profile-shape.js';
 import { askGaps, askShape, mustShow } from './ask-shape.js';
+import { looksLikeSecret } from '../shared/key-shape.js';
 import { shapeFor } from './verdict-shape.js';
 import type { VerdictShape } from './verdict-shape.js';
 
@@ -1778,13 +1779,18 @@ function renderPreview(question: string, preview: AskPreview): void {
   const bubble = addTurn('assistant');
 
   if (preview.kind === 'unavailable') {
-    bubble.append(
-      el(
-        'p',
-        undefined,
-        preview.reason === 'no-model-configured' ? t('ask.no-key') : t('ask.no-scan'),
-      ),
-    );
+    if (preview.reason === 'no-model-configured') {
+      // 🟥 Not a sentence and a full stop. The person asked a question and
+      // this is the one thing standing between them and an answer, so the way
+      // to supply it is right here rather than somewhere they have to go and
+      // find.
+      // The PARENT, not the bubble. `addTurn` builds turn > bubble, so
+      // removing the bubble alone leaves an empty box in the conversation.
+      (bubble.parentElement ?? bubble).remove();
+      renderKeyForm();
+      return;
+    }
+    bubble.append(el('p', undefined, t('ask.no-scan')));
     return;
   }
 
@@ -1857,6 +1863,116 @@ function renderPreview(question: string, preview: AskPreview): void {
   row.append(key, value, send, cancel);
   bubble.append(row);
   chat.scrollTop = chat.scrollHeight;
+}
+
+/**
+ * The key screen. Shown when somebody asks a question and there is no key.
+ *
+ * 🟥 A turn in the conversation, not a settings dialog behind a gear icon.
+ * It appears at the moment it is needed, says what the key is for, what it
+ * costs, and where it is kept — and the person can decline by simply not
+ * filling it in. A dialog would ask for a credential before saying why.
+ */
+function renderKeyForm(): void {
+  const bubble = addTurn('assistant');
+  bubble.append(el('h3', 'section-head', t('ask.key.head')));
+  bubble.append(el('p', 'card-note', t('ask.no-key')));
+
+  void window.ledar.modelSettings().then((settings) => {
+    if (!settings.canStoreKey) {
+      const card = el('div', 'card alarm');
+      card.append(icon('alert', 'card-icon'));
+      card.append(el('p', 'card-note', t('ask.key.cannot')));
+      bubble.append(card);
+      return;
+    }
+
+    const facts = el('ul', 'fact-list');
+    facts.append(el('li', undefined, t('ask.key.where', { baseUrl: settings.baseUrl })));
+    facts.append(el('li', undefined, t('ask.key.cost')));
+    bubble.append(facts);
+
+    const keyField = el('input', 'inline-input');
+    keyField.type = 'password';
+    keyField.placeholder = t('ask.key.field');
+    keyField.setAttribute('aria-label', t('ask.key.field'));
+    // Wide, because a key is long and a person pasting one should be able to
+    // see that they pasted the whole thing.
+    keyField.style.minWidth = '32ch';
+
+    // 🟥 The provider and model live behind a disclosure control, and the key
+    // does not. One field is the common case; two more are the person who
+    // brought a key from somewhere else. Putting all three up front would ask
+    // somebody who does not understand backends to make two choices they have
+    // no way to make.
+    const advanced = el('details', 'evidence');
+    advanced.append(el('summary', undefined, t('ask.key.advanced')));
+    const urlField = el('input', 'inline-input');
+    urlField.type = 'text';
+    urlField.value = settings.baseUrl;
+    urlField.setAttribute('aria-label', t('ask.key.baseurl'));
+    urlField.style.minWidth = '32ch';
+    const modelField = el('input', 'inline-input');
+    modelField.type = 'text';
+    modelField.value = settings.model;
+    modelField.setAttribute('aria-label', t('ask.key.model'));
+    const rows = el('div', 'actions');
+    rows.append(el('span', 'gap-label', t('ask.key.baseurl')), urlField);
+    rows.append(el('span', 'gap-label', t('ask.key.model')), modelField);
+    advanced.append(rows);
+    bubble.append(advanced);
+
+    const actions = el('div', 'actions');
+    const save = el('button', 'button primary', t('ask.key.save'));
+    save.type = 'button';
+    actions.append(keyField, save);
+
+    if (settings.hasKey) {
+      const forget = el('button', 'button', t('ask.key.forget'));
+      forget.type = 'button';
+      forget.addEventListener('click', () => {
+        forget.disabled = true;
+        void window.ledar.forgetModelKey().then(() => {
+          bubble.append(el('p', 'card-note', t('ask.key.forgotten')));
+          announce(t('ask.key.forgotten'));
+        });
+      });
+      actions.append(forget);
+      bubble.append(
+        el(
+          'p',
+          'card-note',
+          t('ask.key.have', { model: settings.model, baseUrl: settings.baseUrl }),
+        ),
+      );
+    }
+
+    save.addEventListener('click', () => {
+      save.disabled = true;
+      void window.ledar
+        .saveModelSettings(urlField.value, modelField.value, keyField.value)
+        .then((out) => {
+          // Cleared whatever the outcome. A key sitting in a field is a key on
+          // screen, and there is no reason for it to still be there.
+          keyField.value = '';
+          if (out.kind === 'saved') {
+            bubble.append(el('p', 'card-note', t('ask.key.saved')));
+            announce(t('ask.key.saved'));
+            return;
+          }
+          save.disabled = false;
+          const card = el('div', 'card alarm');
+          card.append(icon('alert', 'card-icon'));
+          card.append(
+            el('p', 'card-note', out.kind === 'cannot-encrypt' ? t('ask.key.cannot') : out.why),
+          );
+          bubble.append(card);
+        });
+    });
+
+    bubble.append(actions);
+    chat.scrollTop = chat.scrollHeight;
+  });
 }
 
 /** The answer turn. Four shapes, and no two of them alike. */
@@ -2022,6 +2138,24 @@ async function submitQuestion(): Promise<void> {
   const question = input.value.trim();
   if (question.length === 0 || session === null || askInFlight) return;
   input.value = '';
+
+  // 🟥 Checked BEFORE the question is echoed into the conversation. The main
+  // process refuses it too — that is the boundary — but by then it would
+  // already be drawn on screen, and a key on screen is a key in the next
+  // screenshot somebody takes.
+  //
+  // This happened: a click missed the key field by a few pixels and a real
+  // key landed here instead, in clear text, one button from being sent.
+  if (looksLikeSecret(question)) {
+    const bubble = addTurn('assistant');
+    const card = el('div', 'card alarm');
+    card.append(icon('alert', 'card-icon'));
+    card.append(el('p', 'card-note', t('ask.looks-like-key')));
+    bubble.append(card);
+    announce(t('ask.looks-like-key'));
+    return;
+  }
+
   addTurn('user').append(el('p', undefined, question));
   try {
     renderPreview(question, await window.ledar.askPreview(session, question));

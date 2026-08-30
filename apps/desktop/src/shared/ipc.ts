@@ -59,6 +59,12 @@ export const CHANNELS = {
   saveProfile: 'ledar:save-profile',
   /** The person agreed with what was shown for one area. The only path to `verified`. */
   confirmArea: 'ledar:confirm-area',
+  /** Where the model lives and whether a key is stored. NEVER the key. */
+  modelSettings: 'ledar:model-settings',
+  /** The person typed a key. The only path by which one is stored. */
+  saveModelSettings: 'ledar:save-model-settings',
+  /** Deliberately remove the stored key. Never a side effect of anything. */
+  forgetModelKey: 'ledar:forget-model-key',
   /** What one question would send, before a byte moves. Sends nothing itself. */
   askPreview: 'ledar:ask-preview',
   /** The person read the disclosure and agreed. THIS is the call that sends. */
@@ -395,6 +401,38 @@ export type ProfileFacts = {
 };
 
 /**
+ * Where the model lives, and whether a key has been stored.
+ *
+ * 🟥 `hasKey`, never the key. The window needs to know whether to ask for one;
+ * it never needs the value. Sending it would put a credential into a browser
+ * context for a reason nobody could state, and "the renderer is ours" is the
+ * exact claim this boundary exists to not rely on.
+ */
+export type ModelSettings = {
+  readonly baseUrl: string;
+  readonly model: string;
+  readonly hasKey: boolean;
+  /**
+   * False when the operating system cannot encrypt — no keyring, a service
+   * account. The screen says why it will not take a key, rather than seeming
+   * to accept one and losing it.
+   */
+  readonly canStoreKey: boolean;
+};
+
+/** What came of trying to store what somebody typed. */
+export type SaveModelOutcome =
+  | { kind: 'saved'; settings: ModelSettings }
+  | {
+      /**
+       * The OS cannot encrypt, so nothing was written. 🟥 There is no honest
+       * version of "we could not protect this, so we wrote it down".
+       */
+      kind: 'cannot-encrypt';
+    }
+  | { kind: 'rejected'; why: string };
+
+/**
  * What one question would send, and what stops it.
  *
  * 🟥 Three outcomes, and `unavailable` is not an error. A build with no model
@@ -548,6 +586,17 @@ export type LedarBridge = {
    * a reader of the bridge can tell apart. A single method with a `confirm`
    * flag would put the boundary inside an argument.
    */
+  /** Where the model lives and whether a key is stored. Never the key. */
+  modelSettings(): Promise<ModelSettings>;
+  /**
+   * Store what the person typed.
+   *
+   * An empty `key` means "leave the stored one alone", so somebody changing
+   * the model name does not silently lose their credential. `forgetModelKey`
+   * is the deliberate way to remove it.
+   */
+  saveModelSettings(baseUrl: string, model: string, key: string): Promise<SaveModelOutcome>;
+  forgetModelKey(): Promise<ModelSettings>;
   askPreview(session: SessionHandle, question: string): Promise<AskPreview>;
   /**
    * The person read it and agreed. This is the only call that sends anything.

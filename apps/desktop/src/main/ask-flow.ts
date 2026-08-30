@@ -19,18 +19,23 @@
  * answered. One human decision, two machine permits: those are different
  * things and collapsing either into the other loses something real.
  *
- * ## 🟥 No key is a STATE
+ * ## 🟥 No key is a STATE, and now it is an INVITATION
  *
- * A packaged build has no model configured — `infra/.env` is a development
- * file and is not in the shipped layout. That is not an error to dress up. The
- * same lesson `saveProfile` learned by returning `ProfileFacts | null`: a
- * person who has not set something up gets told what is missing, not a red box
- * about a failure that did not happen.
+ * A packaged build ships with no key and cannot: `LEDAR.msix` is a zip whose
+ * `main.js` is 639,396 bytes of readable JavaScript, so anything encrypted in
+ * there travels with whatever decrypts it. `model-settings.ts` says the rest.
  *
- * ⚠️ And it is a real gap rather than a decision. Where a shipped build should
- * keep a key is a security question nobody has answered yet — OS credential
- * store, a proxy that holds it, or the person pasting one into a field. Debt
- * N63. Until then the packaged app says so plainly and asks nothing.
+ * So the key is the person's own, typed once and kept by the operating
+ * system. Having none is still a STATE rather than an error — the same lesson
+ * `saveProfile` learned by returning `ProfileFacts | null` — but the screen
+ * can now do something about it instead of only reporting it.
+ *
+ * ⚠️ Debt N63 is NARROWED by this, not closed. Bring-your-own-key serves the
+ * people an open-source Postgres tool reaches first, who can get a key in five
+ * minutes. It does not serve `CLAUDE.md` §3's reader — somebody who does not
+ * understand backends and is accountable for one — and telling them to go and
+ * buy an API key is handing them a developer's errand. That reader is served
+ * by a proxy holding the key, and that is still unbuilt.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -56,6 +61,8 @@ import type { CallRecord, ModelConfig } from '@ledar/model-client';
 import { runTrace } from '@ledar/tracer';
 
 import type { AskOutcome, AskPreview, SessionHandle } from '../shared/ipc.js';
+import { looksLikeSecret } from '../shared/key-shape.js';
+import { currentSettings, storedKey } from './model-settings.js';
 import { dsnFor } from './session.js';
 
 /** The same list every other flow reads. */
@@ -70,29 +77,35 @@ const PERMIT_TTL_MS = 180_000;
 const MAX_QUESTION = 2000;
 
 /**
- * The model configuration, or null when this build has none.
+ * The model configuration, or null when nobody has provided a key.
  *
- * Read from the environment and nowhere else. A file path would be a guess
- * about where this process is running from, and the packaged app runs from a
- * directory with no repository anywhere near it — so the honest answer there
- * is null, arrived at by the same code path rather than by a special case.
+ * Three fields, and all three are the person's: where to send, which model,
+ * and the credential. Bring-your-own-key means bring-your-own-provider, so a
+ * hardcoded model name would fail against every provider but the one this
+ * repository happens to use.
  */
 export function modelConfig(): ModelConfig | null {
-  const baseUrl = process.env['AI_BASE_URL']?.trim();
-  const apiKey = process.env['AI_API_KEY']?.trim();
-  if (!baseUrl || !apiKey) return null;
-  // Tiers are product configuration rather than a secret, but they live in
-  // `infra/` and are not in the shipped layout either. Written out here so the
-  // desktop needs no file at all: one tier, the one this screen uses.
+  const settings = currentSettings();
+  // 🟥 The environment first, and ONLY for development. `infra/run-desktop.mjs`
+  // puts a key there; a packaged build has none, and reading a file path
+  // instead would be a guess about where the process is running.
   //
-  // ⚠️ A second copy of a value that also lives in `infra/ai-tiers.json`, and
-  // that is debt N57's shape. It is taken deliberately and narrowly — the
-  // model NAME is the only field duplicated, and `ask-flow.test.ts` asserts
-  // the two agree, so a tier changed there without changing this goes red.
+  // A person's stored key beats it when both exist — this is their app, and
+  // a variable in a shell they did not set should not override what they
+  // typed into a screen.
+  const key = storedKey() ?? process.env['AI_API_KEY']?.trim() ?? null;
+  const baseUrl = settings.hasKey
+    ? settings.baseUrl
+    : (process.env['AI_BASE_URL']?.trim() ?? settings.baseUrl);
+  if (key === null || key.length === 0) return null;
+
   return {
     baseUrl,
-    apiKey,
-    tiers: { [TIER]: { model: 'qwen3.8-27b', effort: 'low', maxTokens: 2000 } },
+    apiKey: key,
+    // The model comes from settings too, because bring-your-own-key means
+    // bring-your-own-provider: a key from somewhere else serves different
+    // model names, and a hardcoded one would fail on every provider but ours.
+    tiers: { [TIER]: { model: settings.model, effort: 'low', maxTokens: 2000 } },
   };
 }
 
@@ -234,6 +247,21 @@ export async function askPreview(
   const question = cleanQuestion(rawQuestion);
   if (question === null) return { kind: 'unavailable', reason: 'no-scan-yet' };
 
+  // 🟥 Before anything else, including before the map is read. A credential in
+  // the question box is the worst payload this screen can carry: it would
+  // leave the machine inside something the disclosure calls "your question".
+  // It happened once, to somebody who knew what the two boxes were for.
+  if (looksLikeSecret(question)) {
+    return {
+      kind: 'refused',
+      why:
+        'That looks like an API key rather than a question. Nothing was sent. ' +
+        'If you meant to save a key, ask a question and LEDAR will offer the ' +
+        'field for it — and a key never belongs in the same box as a question, ' +
+        'because a question is what gets sent to the model.',
+    };
+  }
+
   const config = modelConfig();
   if (config === null) return { kind: 'unavailable', reason: 'no-model-configured' };
 
@@ -278,7 +306,20 @@ export async function askSend(
   rawValue: unknown,
 ): Promise<AskOutcome> {
   const question = cleanQuestion(rawQuestion);
-  if (question === null) return { kind: 'unavailable', why: 'That is not a question.', provenance: null, detail: null };
+  if (question === null) {
+    return { kind: 'unavailable', why: 'That is not a question.', provenance: null, detail: null };
+  }
+  // Checked again here, and not only in `askPreview`. This is the function
+  // that sends; a guard that lives only on the path before it is a guard the
+  // sending path does not have.
+  if (looksLikeSecret(question)) {
+    return {
+      kind: 'unavailable',
+      why: 'That looks like an API key rather than a question. Nothing was sent.',
+      provenance: null,
+      detail: null,
+    };
+  }
 
   const config = modelConfig();
   if (config === null) {

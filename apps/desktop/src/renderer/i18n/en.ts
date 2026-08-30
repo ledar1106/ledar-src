@@ -364,7 +364,30 @@ export const en = {
   'ask.send': 'Show me what would be sent',
   'ask.confirm': 'Send it',
   'ask.cancel': 'Do not send',
-  'ask.no-key': 'No model is configured, so nothing can be asked yet. This build has no key for the service that reads your question, and LEDAR will not invent one.',
+  // 🟥 An invitation, not a dead end. The first version of this line reported
+  // a state and stopped there, because there was nothing a person could do
+  // about it. Now there is.
+  'ask.no-key': 'To answer a question, LEDAR sends it — with your table names and no rows — to a model you choose. That needs a key from your provider, and LEDAR does not ship one: a key inside an installed app can be read out of it by anybody who has the app.',
+  'ask.looks-like-key': 'That looks like an API key rather than a question, so it was not sent and is not shown. A key never belongs in the question box — what goes in there is what gets sent to the model. Ask a question and LEDAR will offer a field for the key.',
+  'ask.key.head': 'Your model, your key',
+  // 🟥 Names the address instead of saying "above". It is not above — it sits
+  // behind the advanced control, and a sentence pointing at something the
+  // reader cannot see is a sentence that teaches them not to trust the rest.
+  'ask.key.where': 'The key is kept by Windows, encrypted for this account on this machine. LEDAR sends it to {baseUrl} and nowhere else.',
+  'ask.key.cost': 'Each question is two calls. Measured on this product: about $0.005 per question, billed by your provider to you.',
+  'ask.key.field': 'API key',
+  'ask.key.advanced': 'Change the provider or the model',
+  'ask.key.baseurl': 'Address',
+  'ask.key.model': 'Model name',
+  'ask.key.save': 'Save the key',
+  'ask.key.saved': 'Saved. You can ask a question now.',
+  'ask.key.forget': 'Forget this key',
+  'ask.key.forgotten': 'The key is gone from this machine.',
+  'ask.key.have': 'A key is stored for {model} at {baseUrl}.',
+  // 🟥 Refused, not "failed". Nothing was written, and saying so is the whole
+  // point — there is no honest version of "we could not protect this, so we
+  // wrote it down".
+  'ask.key.cannot': 'This computer cannot encrypt a stored secret, so LEDAR will not keep one. Nothing was written.',
   'ask.no-scan': 'Nothing has been read from your database yet, so there is no map to look in. Connect and scan first.',
 
   'ask.leaving.head': 'Before anything leaves this machine',

@@ -14,6 +14,22 @@ import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { modelConfig, readableDbError, readerSentenceFor } from '../src/main/ask-flow.js';
+import { useCipher } from '../src/main/model-settings.js';
+
+/**
+ * `modelConfig` now reads the person's stored settings, and those are held by
+ * the operating system's own cipher. Under plain node there is none — the
+ * `electron` stub has no `safeStorage` — so the seam is filled with something
+ * that cannot encrypt. That is the honest stand-in for a fresh machine where
+ * nobody has typed a key: no stored key, and the environment is what is left.
+ */
+function noStoredKey(): void {
+  useCipher({
+    isEncryptionAvailable: () => false,
+    encryptString: () => Buffer.alloc(0),
+    decryptString: () => '',
+  });
+}
 
 describe('the database refused, and a person has to read why', () => {
   it("🟥 strips the aliases this product invented, not the database's words", () => {
@@ -79,6 +95,7 @@ describe('the tier name is written twice, and the two must agree', () => {
     const shipped = JSON.parse(readFileSync(tiers, 'utf8')) as {
       tiers: Record<string, { model: string }>;
     };
+    noStoredKey();
     process.env['AI_BASE_URL'] = 'https://example.invalid/v1';
     process.env['AI_API_KEY'] = 'not-a-real-key';
     try {
@@ -88,10 +105,12 @@ describe('the tier name is written twice, and the two must agree', () => {
     } finally {
       delete process.env['AI_BASE_URL'];
       delete process.env['AI_API_KEY'];
+      useCipher(null);
     }
   });
 
   it('🟥 no key is null, and null is a state rather than a throw', () => {
+    noStoredKey();
     const base = process.env['AI_BASE_URL'];
     const key = process.env['AI_API_KEY'];
     delete process.env['AI_BASE_URL'];
@@ -103,6 +122,7 @@ describe('the tier name is written twice, and the two must agree', () => {
     } finally {
       if (base !== undefined) process.env['AI_BASE_URL'] = base;
       if (key !== undefined) process.env['AI_API_KEY'] = key;
+      useCipher(null);
     }
   });
 });

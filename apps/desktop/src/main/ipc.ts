@@ -23,6 +23,8 @@ import type {
   AreaReply,
   AskOutcome,
   AskPreview,
+  ModelSettings,
+  SaveModelOutcome,
   ConnectOutcome,
   DevPrefill,
   GuideBundle,
@@ -32,6 +34,7 @@ import type {
   SessionHandle,
 } from '../shared/ipc.js';
 import { askPreview, askSend } from './ask-flow.js';
+import { currentSettings, forgetKey, saveSettings } from './model-settings.js';
 import { guideBundle, runConnectFlow } from './connect-flow.js';
 import { interviewForm } from './interview-form.js';
 import { confirmArea, currentFacts, saveProfile } from './profile-flow.js';
@@ -228,6 +231,33 @@ export function registerIpc(opts: {
       }
     },
   );
+
+  // Takes nothing and returns no secret. The window asks where the model is
+  // and whether a key exists; it never learns the key.
+  ipcMain.handle(CHANNELS.modelSettings, (event): ModelSettings => {
+    assertAppWindow(event);
+    return currentSettings();
+  });
+
+  /**
+   * The person typed a key. The only channel by which one is stored.
+   *
+   * 🟥 Validated here rather than in the preload, like every other payload:
+   * the boundary is this side. `saveSettings` refuses anything that is not
+   * `https://`, because a key sent over http is a key read on the way.
+   */
+  ipcMain.handle(
+    CHANNELS.saveModelSettings,
+    (event, baseUrl: unknown, model: unknown, key: unknown): SaveModelOutcome => {
+      assertAppWindow(event);
+      return saveSettings(baseUrl, model, key);
+    },
+  );
+
+  ipcMain.handle(CHANNELS.forgetModelKey, (event): ModelSettings => {
+    assertAppWindow(event);
+    return forgetKey();
+  });
 
   /**
    * What a question would send. Sends nothing, and says so by being a

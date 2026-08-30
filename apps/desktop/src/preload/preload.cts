@@ -23,6 +23,8 @@
 import type {
   AskOutcome,
   AskPreview,
+  ModelSettings,
+  SaveModelOutcome,
   ConnectOutcome,
   DevPrefill,
   AreaReply,
@@ -58,6 +60,22 @@ const api: LedarBridge = {
   // file must NOT do is decide whether sending is allowed — that boundary is
   // in main/ask-flow.ts, and a preload that pre-approved anything would be a
   // second place holding the consent rule.
+  modelSettings: (): Promise<ModelSettings> => ipcRenderer.invoke('ledar:model-settings'),
+  // The key crosses HERE and in this direction only. Nothing on this bridge
+  // sends one back, which is a property a reader of this page can confirm at
+  // a glance: `ModelSettings` has `hasKey`, not `key`.
+  saveModelSettings: (
+    baseUrl: string,
+    model: string,
+    key: string,
+  ): Promise<SaveModelOutcome> =>
+    ipcRenderer.invoke(
+      'ledar:save-model-settings',
+      String(baseUrl),
+      String(model),
+      String(key),
+    ),
+  forgetModelKey: (): Promise<ModelSettings> => ipcRenderer.invoke('ledar:forget-model-key'),
   askPreview: (session: SessionHandle, question: string): Promise<AskPreview> =>
     ipcRenderer.invoke('ledar:ask-preview', String(session), String(question)),
   askSend: (
