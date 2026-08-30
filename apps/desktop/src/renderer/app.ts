@@ -1917,11 +1917,13 @@ function renderAnswer(outcome: AskOutcome): void {
         el(
           'span',
           'timeline-what',
-          t('ask.hop', {
-            entity: step.entity,
-            rows: String(step.rows),
-            via: step.via,
-          }),
+          step.rows === 1
+            ? t('ask.hop.one', { entity: step.entity, via: step.via })
+            : t('ask.hop.many', {
+                entity: step.entity,
+                rows: String(step.rows),
+                via: step.via,
+              }),
         ),
       );
       // The tier travels with the row, for the same reason `timeColumn` does:

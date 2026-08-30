@@ -397,7 +397,13 @@ export const en = {
   // Counted and found none. NOT the same as nobody counting — `similar` is
   // null for that, and this line is never reached then.
   'ask.similar.none': 'No other subject shows the same break',
-  'ask.hop': '{entity} — {rows} rows via {via}',
+  // 🟥 Two keys, the third time this has come up. `t()` substitutes and does
+  // not inflect, so one string cannot serve both counts — and "1 rows via
+  // subject_id" was on screen, next to a sentence about being careful with
+  // numbers. A visible grammar mistake in an admission is an admission read
+  // with less weight.
+  'ask.hop.one': '{entity} — 1 row via {via}',
+  'ask.hop.many': '{entity} — {rows} rows via {via}',
   'ask.untimed': 'no time recorded',
   'ask.tier': 'worth its weakest hop: {tier}',
 } as const;
