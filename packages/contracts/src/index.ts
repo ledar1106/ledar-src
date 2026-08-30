@@ -21,6 +21,7 @@ export * from './profile-observe.js';
 export * from './scan-plan.js';
 export * from './entity-graph.js';
 export * from './bounded-lookup.js';
+export * from './ask-envelope.js';
 export * from './target-provenance.js';
 export * from './timeline.js';
 export * from './egress-permit.js';

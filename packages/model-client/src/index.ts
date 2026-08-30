@@ -177,14 +177,30 @@ const DEFAULT_TIMEOUT_MS = 60_000;
  * work around — it is the mechanism: a payload nobody agreed to cannot match
  * a permit somebody granted.
  */
+/**
+ * Where the calls go, without needing a prompt to ask.
+ *
+ * A consent screen has to name the destination BEFORE a prompt exists — the
+ * person is deciding whether to build one. The alternative was casting an
+ * empty object to `SealedPrompt` at the call site to borrow `outboundOf`, and
+ * a cast that fakes a sealed value to read a URL is exactly the shape the
+ * brand exists to make impossible.
+ *
+ * 🟥 One expression, used by both. If this and `outboundOf` ever computed the
+ * URL differently, a permit would be granted for one address and spent at
+ * another, and the disclosure a person read would name neither.
+ */
+export function destinationOf(config: ModelConfig): string {
+  return `${config.baseUrl.replace(/\/+$/, '')}/chat/completions`;
+}
+
 export function outboundOf(
   config: ModelConfig,
   tier: TierConfig,
   prompt: SealedPrompt,
 ): { body: string; destination: string } {
-  const base = config.baseUrl.replace(/\/+$/, '');
   return {
-    destination: `${base}/chat/completions`,
+    destination: destinationOf(config),
     body: JSON.stringify({
       model: tier.model,
       max_tokens: tier.maxTokens,

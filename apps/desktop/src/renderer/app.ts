@@ -25,6 +25,8 @@
 import type {
   AreaFacts,
   AreaReply,
+  AskOutcome,
+  AskPreview,
   ConnectOutcome,
   InterviewQuestion,
   ProfileArea,
@@ -48,6 +50,7 @@ import {
 } from './interview.js';
 import type { AnswerResult, Interview } from './interview.js';
 import { EVERY_RUNG, shapeForDirection, shapeForRung } from './profile-shape.js';
+import { askGaps, askShape, mustShow } from './ask-shape.js';
 import { shapeFor } from './verdict-shape.js';
 import type { VerdictShape } from './verdict-shape.js';
 
@@ -1080,6 +1083,16 @@ function profileUnavailable(): void {
 function renderProfile(facts: ProfileFacts, refocus: ProfileArea | null): void {
   profileFacts = facts;
 
+  // 🟥 S6 opens HERE and not a moment earlier. A question is answered by
+  // looking in the map, so the composer stays disabled until there is one —
+  // and the map is the thing this function has just been handed.
+  //
+  // Not gated on every area being `verified`. Confirmation is about what the
+  // person believes of their own system; the routes G3 walks come from the
+  // catalogue either way, and refusing to answer until five cards are ticked
+  // would be a gate whose reason nobody could state.
+  enableComposer();
+
   if (profileBlock === null) {
     const bubble = addTurn('assistant');
     bubble.append(el('p', undefined, t('profile.intro')));
@@ -1704,6 +1717,296 @@ function renderOutcome(outcome: ConnectOutcome): void {
   chat.scrollTop = chat.scrollHeight;
 }
 
+// ---- S6: ask one question, and see what leaves before it leaves ------------
+//
+// 🟥 This is the first screen in the product that sends anything anywhere.
+// Everything above reads the person's own database and writes to their own
+// disk; from here a question and a list of their table names go to a third
+// party. So the sequence is: type · SEE WHAT LEAVES · agree · answer — and the
+// disclosure is a turn in the conversation rather than a modal, because a
+// modal is a thing people dismiss and a turn is a thing they read.
+//
+// The composer has been on the page and inert since 2026-08-27, waiting for
+// exactly this. Its old comment said S7 would need it; S6 needed it first.
+
+/** Set once the map exists, so the composer cannot be used before there is one. */
+let askable = false;
+/** One question in flight at a time. Main enforces it too; this stops the ask. */
+let askInFlight = false;
+
+function enableComposer(): void {
+  askable = true;
+  const input = composerInput();
+  input.disabled = false;
+  input.placeholder = t('ask.placeholder');
+  const send = composerSend();
+  send.disabled = false;
+  send.textContent = t('ask.send');
+  // 🟥 Focused, and found by driving the window rather than by reasoning: the
+  // first click on the just-enabled field did nothing three times running,
+  // because the map is still being laid out underneath it. A field that has
+  // this moment become the one thing a person can use, and swallows their
+  // first attempt at using it, teaches them the product is unresponsive —
+  // and they learn that before they have read a word of what it says.
+  //
+  // Only when nothing else is focused. Stealing focus from somebody already
+  // typing, or mid-way through reading a confirmation, would be worse than
+  // the bug.
+  if (document.activeElement === null || document.activeElement === document.body) {
+    input.focus();
+  }
+}
+
+/**
+ * The disclosure turn: what would leave, and the two fields that say which row.
+ *
+ * 🟥 The row identifier is asked for HERE rather than earlier, and that is not
+ * layout. It is the last thing collected before sending, so the person is
+ * looking at the list of what leaves at the moment they decide — and `which
+ * customer` is theirs to know, never something this product guesses at.
+ */
+function renderPreview(question: string, preview: AskPreview): void {
+  const bubble = addTurn('assistant');
+
+  if (preview.kind === 'unavailable') {
+    bubble.append(
+      el(
+        'p',
+        undefined,
+        preview.reason === 'no-model-configured' ? t('ask.no-key') : t('ask.no-scan'),
+      ),
+    );
+    return;
+  }
+
+  if (preview.kind === 'refused') {
+    // Not a send button with a warning above it. There is no send button.
+    const card = el('div', 'card alarm');
+    card.append(icon('alert', 'card-icon'));
+    card.append(el('p', 'card-line', t('ask.leaving.refuse')));
+    card.append(el('p', 'card-note', preview.why));
+    bubble.append(card);
+    return;
+  }
+
+  bubble.append(el('h3', 'section-head', t('ask.leaving.head')));
+
+  const list = el('ul', 'fact-list');
+  for (const line of [
+    t('ask.leaving.dest', { destination: preview.destination }),
+    t('ask.leaving.names', { count: String(preview.identifiers.length) }),
+    t('ask.leaving.bytes', {
+      bytes: String(preview.firstBytes + preview.secondBytesAtWorst),
+    }),
+    t('ask.leaving.rows'),
+  ]) {
+    list.append(el('li', undefined, line));
+  }
+  bubble.append(list);
+
+  // The sentence the main side wrote, quoted rather than rephrased. Two places
+  // wording the same disclosure is two disclosures.
+  bubble.append(el('p', 'card-note', preview.note));
+
+  // 🟥 The names themselves, behind a disclosure control rather than hidden.
+  // A screen that says "37 table names" and will not show which 37 is asking
+  // for agreement to something it declined to display.
+  const names = el('details', 'evidence');
+  names.append(el('summary', undefined, t('ask.leaving.names', {
+    count: String(preview.identifiers.length),
+  })));
+  names.append(codeBlock(preview.identifiers.join('\n')));
+  bubble.append(names);
+
+  const row = el('div', 'actions');
+  const key = el('input', 'inline-input');
+  key.type = 'text';
+  key.placeholder = 'customer_id';
+  key.setAttribute('aria-label', 'which column identifies the row');
+  const value = el('input', 'inline-input');
+  value.type = 'text';
+  value.placeholder = '1';
+  value.setAttribute('aria-label', 'which row');
+  const send = el('button', 'button primary', t('ask.confirm'));
+  send.type = 'button';
+  const cancel = el('button', 'button', t('ask.cancel'));
+  cancel.type = 'button';
+
+  send.addEventListener('click', () => {
+    send.disabled = true;
+    cancel.disabled = true;
+    void runAsk(question, key.value.trim(), value.value.trim());
+  });
+  cancel.addEventListener('click', () => {
+    send.disabled = true;
+    cancel.disabled = true;
+    key.disabled = true;
+    value.disabled = true;
+    announce(t('ask.cancel'));
+  });
+
+  row.append(key, value, send, cancel);
+  bubble.append(row);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+/** The answer turn. Four shapes, and no two of them alike. */
+function renderAnswer(outcome: AskOutcome): void {
+  const bubble = addTurn('assistant');
+  if (outcome.kind === 'unavailable') {
+    // 🟥 The note FIRST, even here — especially here. A lookup that failed
+    // because it was aimed somewhere the question named is explained by
+    // exactly this sentence, and rendering it only on the success path meant
+    // the one case that needed it never got it.
+    if (outcome.provenance !== null) {
+      const why = el('div', 'card pending');
+      why.append(icon('shield', 'card-icon'));
+      why.append(el('p', 'card-note', outcome.provenance));
+      bubble.append(why);
+    }
+    bubble.append(el('p', 'card-note', outcome.why));
+    return;
+  }
+
+  const { timeline, provenance } = outcome;
+  const shape = askShape(timeline, outcome.aimedNowhere);
+  const notes = mustShow(timeline, provenance);
+
+  // 🟥 `before` first, and the ordering comes from `mustShow` rather than from
+  // the order these lines happen to be written in. A reader who learns where
+  // the answer was aimed only after reading the rows has already believed them.
+  for (const note of notes.filter((n) => n.where === 'before')) {
+    const card = el('div', 'card pending');
+    card.append(icon('shield', 'card-icon'));
+    card.append(el('p', 'card-note', note.text));
+    bubble.append(card);
+  }
+
+  if (shape.bannerAtTop) {
+    const banner = el('div', `banner ${shape.tone}`);
+    banner.append(icon(shape.icon, 'card-icon'));
+    banner.append(el('span', undefined, t(shape.headlineKey)));
+    bubble.append(banner);
+  }
+
+  const card = el('div', `card ${shape.tone}`);
+  card.append(icon(shape.icon, 'card-icon'));
+  card.append(
+    el(
+      'p',
+      'card-line',
+      shape.kind === 'broke'
+        ? t('ask.broke', { entity: timeline.brokeAt?.at ?? '' })
+        : t(shape.headlineKey),
+    ),
+  );
+  bubble.append(card);
+
+  if (timeline.steps.length > 0) {
+    const steps = el('ol', 'timeline');
+    for (const step of timeline.steps) {
+      const li = el('li');
+      li.append(
+        el(
+          'span',
+          'timeline-when',
+          step.at ?? t('ask.untimed'),
+        ),
+      );
+      li.append(
+        el(
+          'span',
+          'timeline-what',
+          t('ask.hop', {
+            entity: step.entity,
+            rows: String(step.rows),
+            via: step.via,
+          }),
+        ),
+      );
+      // The tier travels with the row, for the same reason `timeColumn` does:
+      // a hop worth `guessed` and a hop worth `declared` are not the same
+      // claim, and a reader who cannot see which cannot disagree.
+      li.append(el('span', 'timeline-tier', step.tier));
+      steps.append(li);
+    }
+    bubble.append(steps);
+  }
+
+  if (timeline.brokeAt !== null) {
+    const broke = el('div', 'card attention');
+    broke.append(
+      el('p', 'card-note', t('ask.tier', { tier: timeline.brokeAt.tier })),
+    );
+    if (timeline.similar !== null) {
+      // Three sentences for three counts. `t()` substitutes and does not
+      // inflect, so "1 other subjects" is what one string produces — and it
+      // was on screen before anybody looked.
+      const line =
+        timeline.similar === 0
+          ? t('ask.similar.none')
+          : timeline.similar === 1
+            ? t('ask.similar.one')
+            : t('ask.similar.many', { count: String(timeline.similar) });
+      broke.append(el('p', 'card-note', line));
+    }
+    bubble.append(broke);
+  }
+
+  // 🟥 Three absences, three headings, never merged. Somebody told their schema
+  // is unwalkable goes and looks at their foreign keys; somebody told the
+  // ceiling was reached raises the ceiling. Fold them and half do the wrong
+  // thing — which is why `timeline.ts` spent a type keeping them apart.
+  for (const gap of askGaps(timeline)) {
+    const box = el('div', `gap gap-${gap.kind}`);
+    box.append(el('p', 'gap-label', t(gap.labelKey)));
+    box.append(el('p', 'gap-entities', gap.entities.join(', ')));
+    bubble.append(box);
+  }
+
+  if (timeline.outside.length > 0) {
+    bubble.append(el('h3', 'section-head', t('ask.outside.head')));
+    const list = el('ul', 'fact-list');
+    for (const kind of timeline.outside) list.append(el('li', undefined, kind));
+    bubble.append(list);
+  }
+
+  for (const note of notes.filter((n) => n.where === 'after')) {
+    const card2 = el('div', 'card alarm');
+    card2.append(icon('alert', 'card-icon'));
+    card2.append(el('p', 'card-note', note.text));
+    bubble.append(card2);
+  }
+
+  announce(t(shape.headlineKey));
+  chat.scrollTop = chat.scrollHeight;
+}
+
+async function runAsk(question: string, key: string, value: string): Promise<void> {
+  if (session === null) return;
+  askInFlight = true;
+  try {
+    renderAnswer(await window.ledar.askSend(session, question, key, value));
+  } catch (err) {
+    renderAnswer({ kind: 'unavailable', why: String(err), provenance: null });
+  } finally {
+    askInFlight = false;
+  }
+}
+
+async function submitQuestion(): Promise<void> {
+  const input = composerInput();
+  const question = input.value.trim();
+  if (question.length === 0 || session === null || askInFlight) return;
+  input.value = '';
+  addTurn('user').append(el('p', undefined, question));
+  try {
+    renderPreview(question, await window.ledar.askPreview(session, question));
+  } catch (err) {
+    addTurn('assistant').append(el('p', undefined, String(err)));
+  }
+}
+
 // ---- boot ------------------------------------------------------------------
 
 function bootChrome(): void {
@@ -1716,19 +2019,22 @@ function bootChrome(): void {
   const composerInput = byId('composer-input', HTMLInputElement);
   composerInput.placeholder = t('composer.waiting');
   byId('composer-send', HTMLButtonElement).textContent = t('composer.send');
-  // 🟥 The composer accepts nothing and submits nothing, as of 2026-08-27.
+  // 🟥 The composer carries ONE thing: a question about something that went
+  // wrong. Live since 2026-08-28, and disabled until a map exists.
   //
-  // It existed to carry one free-text answer into a model. There is no free
-  // text in this product any more (`interview.ts` says why), so the handler
-  // that used to send one is gone rather than left pointing at a function
-  // that does nothing — a live control wired to a no-op is worse than a
-  // disabled one, because it looks like it works.
+  // It sat inert from 2026-08-27 — a control wired to a no-op is worse than a
+  // disabled one, because it looks like it works — and the note left here said
+  // S7 would claim it. S6 claimed it first: `interview.ts`'s ban on free text
+  // is about ANSWERS the product then acts on, and this is the person asking,
+  // which is the one direction free text was always meant to run.
   //
-  // The element stays in the page because S7 (asking about a finding) will
-  // need it, and because removing it would move every other control on the
-  // screen for a slice that has not been designed yet.
+  // ⚠️ It stays disabled until `enableComposer()`. A question with no map to
+  // look in has nowhere to go, and offering the field anyway would be inviting
+  // somebody to type into a product that cannot yet reply.
   byId('composer', HTMLFormElement).addEventListener('submit', (event) => {
     event.preventDefault();
+    if (!askable) return;
+    void submitQuestion();
   });
 }
 

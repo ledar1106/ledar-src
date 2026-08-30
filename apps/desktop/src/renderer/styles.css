@@ -636,3 +636,66 @@ details .code-block { margin-top: 10px; }
   .app-layout { grid-template-columns: 1fr; }
   .app-sidebar { display: none; }
 }
+
+/* ---- S6: a question, what leaves, and the timeline that comes back --------
+ *
+ * 🟥 `.card.alarm` did not exist when S6 first used it. `verdict-shape.ts`
+ * declares an `alarm` tone and the stylesheet carried it only as
+ * `.verdict.alarm`, so a card asking for it rendered as an ordinary card —
+ * the one state in this product that must interrupt a skim, drawn as the
+ * states that must not. Nothing failed and nothing logged. Same 3px double
+ * amber as the verdict, for the same reason `_doc/25` 3.3 ③ gives.
+ */
+.card.alarm { border: 3px double var(--attention); background: var(--surface-raised); }
+.card.alarm .card-icon { color: var(--attention); }
+
+.banner { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: var(--radius-input); margin-bottom: 12px; }
+.banner.alarm { border: 3px double var(--attention); background: var(--surface-raised); color: var(--text); }
+.banner .card-icon { color: var(--attention); flex: none; }
+
+/* The row identifier is collected beside the send button, so the person is
+ * looking at what leaves at the moment they say which row it is about. */
+.inline-input { font: inherit; padding: 6px 10px; border: 1px solid var(--border-strong); border-radius: var(--radius-input); background: var(--surface); color: var(--text); min-width: 8ch; }
+.inline-input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+
+.timeline { display: grid; gap: 8px; margin: 12px 0 0; padding: 0 0 0 18px; }
+.timeline li { display: grid; grid-template-columns: minmax(9ch, auto) 1fr auto; gap: 10px; align-items: baseline; }
+.timeline-when { color: var(--text-muted); font-variant-numeric: tabular-nums; font-size: 13px; }
+.timeline-what { overflow-wrap: anywhere; }
+/* The tier travels with the row. A hop worth `guessed` and one worth
+ * `declared` are not the same claim, and a reader who cannot see which one
+ * they are looking at cannot disagree with it. */
+.timeline-tier { color: var(--text-muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+
+/* 🟥 THREE absences, three looks, and never merged. `timeline.ts` spent a type
+ * keeping them apart; drawing them alike throws that away at the last step.
+ * Somebody told their schema is unwalkable goes and looks at their foreign
+ * keys. Somebody told the ceiling was reached raises the ceiling. */
+.gap { margin-top: 10px; padding: 8px 12px; border-radius: var(--radius-input); border-left: 3px solid var(--border-strong); background: var(--surface-soft); }
+.gap-label { margin: 0; font-size: 13px; color: var(--text-muted); }
+.gap-entities { margin: 2px 0 0; overflow-wrap: anywhere; }
+/* the data said no */
+.gap-unreached { border-left-color: var(--pending); background: var(--pending-soft); }
+/* this product CANNOT ask */
+.gap-unwalkable { border-left-style: dashed; border-left-color: var(--border-strong); }
+/* this product CHOSE to stop — the only one a person can change */
+.gap-unaffordable { border-left-color: var(--attention); background: var(--attention-soft); }
+
+/* 🟥 `.card-icon` was used by S6 before it existed, so every icon rendered at
+ * its natural size and filled the card it was meant to label. Nothing caught
+ * it: tsc was clean, 1135 tests passed, and the class is a string. The window
+ * is what caught it — the second time in one session, after `.card.alarm`.
+ * `check-renderer-classes.py` is the gate that now says so first. */
+.card-icon { width: 18px; height: 18px; flex: none; }
+.card > .card-icon { display: block; margin-bottom: 6px; }
+.card.attention > .card-icon { color: var(--attention); }
+.card.pending > .card-icon { color: var(--pending); }
+.card.ok > .card-icon { color: var(--ok); }
+
+/* 🟥 Four more class names S6 invented with no rule behind them, found the
+ * same way — by looking at the window. Three are folded back onto the
+ * vocabulary that already existed (`fact-list`, `section-body`); these two are
+ * genuinely new shapes and are declared rather than assumed. */
+.section-head { margin: 16px 0 8px; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.card-line { margin: 0; font-weight: 600; line-height: 1.4; }
+.card-note { margin: 6px 0 0; color: var(--text); line-height: 1.5; overflow-wrap: anywhere; }

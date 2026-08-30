@@ -21,6 +21,8 @@ import { AreaAnswer, ProfileArea } from '@ledar/contracts';
 import { CHANNELS } from '../shared/ipc.js';
 import type {
   AreaReply,
+  AskOutcome,
+  AskPreview,
   ConnectOutcome,
   DevPrefill,
   GuideBundle,
@@ -29,6 +31,7 @@ import type {
   ScanOutcome,
   SessionHandle,
 } from '../shared/ipc.js';
+import { askPreview, askSend } from './ask-flow.js';
 import { guideBundle, runConnectFlow } from './connect-flow.js';
 import { interviewForm } from './interview-form.js';
 import { confirmArea, currentFacts, saveProfile } from './profile-flow.js';
@@ -114,6 +117,8 @@ export function registerIpc(opts: {
    * gets to rely on.
    */
   let issued: SessionHandle | null = null;
+  /** One question at a time. See the `askSend` handler for why. */
+  let asking = false;
 
   ipcMain.handle(CHANNELS.guide, (event): GuideBundle => {
     assertAppWindow(event);
@@ -220,6 +225,68 @@ export function registerIpc(opts: {
         return await runScanFlow(session);
       } finally {
         scanning = false;
+      }
+    },
+  );
+
+  /**
+   * What a question would send. Sends nothing, and says so by being a
+   * separate channel from the one that does.
+   *
+   * 🟥 Two channels rather than one with a flag. A reader auditing this
+   * bridge can point at the line that sends; with a `confirm` argument the
+   * boundary would live inside a parameter, where nobody looks.
+   */
+  ipcMain.handle(
+    CHANNELS.askPreview,
+    async (event, session: unknown, question: unknown): Promise<AskPreview> => {
+      assertAppWindow(event);
+      if (typeof session !== 'string' || session.length === 0) {
+        // The same shape a missing scan produces, because from the window's
+        // point of view it is one: there is nothing to look in.
+        return { kind: 'unavailable', reason: 'no-scan-yet' };
+      }
+      return askPreview(session, question);
+    },
+  );
+
+  /**
+   * The person read the disclosure and agreed. The only channel here that
+   * sends anything to anybody.
+   *
+   * Serialised the way `scan` is: a second question in flight would grant a
+   * second pair of permits against the same ledger while the first pair was
+   * still being spent, and what a person agreed to is one exchange.
+   */
+  ipcMain.handle(
+    CHANNELS.askSend,
+    async (
+      event,
+      session: unknown,
+      question: unknown,
+      key: unknown,
+      value: unknown,
+    ): Promise<AskOutcome> => {
+      assertAppWindow(event);
+      if (typeof session !== 'string' || session.length === 0) {
+        return {
+          kind: 'unavailable',
+          why: 'This session is not open. Connect again.',
+          provenance: null,
+        };
+      }
+      if (asking) {
+        return {
+          kind: 'unavailable',
+          why: 'A question is already being asked. Wait for it.',
+          provenance: null,
+        };
+      }
+      asking = true;
+      try {
+        return await askSend(session, question, key, value);
+      } finally {
+        asking = false;
       }
     },
   );

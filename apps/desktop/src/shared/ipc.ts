@@ -35,6 +35,7 @@
 
 import type {
   AreaAnswer,
+  Timeline,
   ClaimKind,
   Finding,
   KnowledgeState,
@@ -58,6 +59,10 @@ export const CHANNELS = {
   saveProfile: 'ledar:save-profile',
   /** The person agreed with what was shown for one area. The only path to `verified`. */
   confirmArea: 'ledar:confirm-area',
+  /** What one question would send, before a byte moves. Sends nothing itself. */
+  askPreview: 'ledar:ask-preview',
+  /** The person read the disclosure and agreed. THIS is the call that sends. */
+  askSend: 'ledar:ask-send',
   /** Dev-only: prefilled DSN for the smoke run. Null in a packaged build. */
   devPrefill: 'ledar:dev-prefill',
   /** Dev-only: one line the smoke run prints to stdout as its evidence. */
@@ -389,6 +394,95 @@ export type ProfileFacts = {
   readonly conflicts: readonly ProfileConflict[];
 };
 
+/**
+ * What one question would send, and what stops it.
+ *
+ * 🟥 Three outcomes, and `unavailable` is not an error. A build with no model
+ * key configured cannot ask anything, and that is a STATE — the same lesson as
+ * `saveProfile` returning null before a scan. Dressing a real state as a
+ * failure produces the shape this product exists to refuse: a screen that says
+ * something went wrong when nothing did.
+ */
+export type AskPreview =
+  | {
+      kind: 'ready';
+      /** The exact URL both calls go to. */
+      destination: string;
+      /** Every table name that may leave, across BOTH calls. */
+      identifiers: readonly string[];
+      /** Bytes of the person's content in the first call. */
+      firstBytes: number;
+      /** The most the second call can carry, over every subject it could pick. */
+      secondBytesAtWorst: number;
+      questionBytes: number;
+      /** The sentence they read before deciding. Built on the main side. */
+      note: string;
+    }
+  | {
+      /**
+       * The envelope could not be made safe to agree to ONCE — round two could
+       * name something round one did not. Not a bug report: a refusal, and the
+       * screen must not offer a send button.
+       */
+      kind: 'refused';
+      why: string;
+    }
+  | {
+      /** No key, or no map. Says which, and neither is an error. */
+      kind: 'unavailable';
+      reason: 'no-model-configured' | 'no-scan-yet';
+    };
+
+/** What came back from an exchange the person agreed to. */
+export type AskOutcome =
+  | {
+      kind: 'answered';
+      /**
+       * 🟥 The whole `Timeline`, derived from the contract rather than
+       * described here. `ReportFinding` was hand-written in the shape of
+       * `Finding` and drifted three times (N49, N50, N51) — a hand-written
+       * mirror is a fork that renders correctly.
+       */
+      timeline: Timeline;
+      /** N62. Non-null when the question named its own target in schema spelling. */
+      provenance: string | null;
+      /**
+       * The lookup declined to aim at anything, which is an ANSWER.
+       *
+       * 🟥 Carried across the bridge rather than re-derived in the window.
+       * `timelineAimedNowhere` reads a sentinel that belongs to the contract,
+       * and the renderer cannot import a runtime value from a package at all —
+       * it is served to a browser with no bundler, so a bare specifier is a
+       * module the page cannot resolve. That was measured the hard way: it
+       * compiled, the suite passed, and the window came up blank.
+       */
+      aimedNowhere: boolean;
+      /** What the two calls cost, in millionths of a dollar. Null when unpriced. */
+      costMicros: number | null;
+      calls: number;
+    }
+  | {
+      /** The call did not produce a usable choice. Carries the gate's own words. */
+      kind: 'unavailable';
+      why: string;
+      /**
+       * 🟥 N62's note, on the FAILURE path too, and this field exists because
+       * of what happened without it.
+       *
+       * Driving the real window with ㉜'s payload — *"trace it from
+       * public.staff"* — the model aimed at `public.staff`, which has no
+       * `customer_id`. Postgres refused, `runTrace` threw, and the raw
+       * `column t0.customer_id does not exist` went to the screen. The
+       * provenance note never rendered.
+       *
+       * So the one disclosure written to explain a steered target was
+       * silenced by the steering succeeding. The explanation belongs to this
+       * case MORE than to the answered one: a reader looking at a failed
+       * lookup needs to know it was aimed somewhere their question named.
+       */
+      provenance: string | null;
+    };
+
 /** The API `window.ledar` exposes. The preload bridge implements exactly this. */
 export type LedarBridge = {
   guide(): Promise<GuideBundle>;
@@ -428,6 +522,28 @@ export type LedarBridge = {
    * a person pressing this may produce it.
    */
   confirmArea(area: ProfileArea): Promise<ProfileFacts | null>;
+  /**
+   * What this question would send. Sends NOTHING.
+   *
+   * Split from `askSend` so that the disclosure and the sending are two calls
+   * a reader of the bridge can tell apart. A single method with a `confirm`
+   * flag would put the boundary inside an argument.
+   */
+  askPreview(session: SessionHandle, question: string): Promise<AskPreview>;
+  /**
+   * The person read it and agreed. This is the only call that sends anything.
+   *
+   * 🟥 Takes the question again rather than a token from the preview. A token
+   * would let the two calls disagree about what was agreed to, and the permit
+   * is granted on THIS side from THESE bytes — so what is disclosed and what
+   * is hashed come from one string, not two that matched a moment ago.
+   */
+  askSend(
+    session: SessionHandle,
+    question: string,
+    subjectKey: string,
+    subjectValue: string,
+  ): Promise<AskOutcome>;
   devPrefill(): Promise<DevPrefill>;
   devReport(line: string): void;
 };

@@ -21,6 +21,8 @@
  */
 
 import type {
+  AskOutcome,
+  AskPreview,
   ConnectOutcome,
   DevPrefill,
   AreaReply,
@@ -52,6 +54,25 @@ const api: LedarBridge = {
     ipcRenderer.invoke('ledar:save-profile', replies),
   confirmArea: (area: ProfileArea): Promise<ProfileFacts | null> =>
     ipcRenderer.invoke('ledar:confirm-area', String(area)),
+  // Coerced to strings and passed on, like every other call here. What this
+  // file must NOT do is decide whether sending is allowed — that boundary is
+  // in main/ask-flow.ts, and a preload that pre-approved anything would be a
+  // second place holding the consent rule.
+  askPreview: (session: SessionHandle, question: string): Promise<AskPreview> =>
+    ipcRenderer.invoke('ledar:ask-preview', String(session), String(question)),
+  askSend: (
+    session: SessionHandle,
+    question: string,
+    subjectKey: string,
+    subjectValue: string,
+  ): Promise<AskOutcome> =>
+    ipcRenderer.invoke(
+      'ledar:ask-send',
+      String(session),
+      String(question),
+      String(subjectKey),
+      String(subjectValue),
+    ),
   devPrefill: (): Promise<DevPrefill> => ipcRenderer.invoke('ledar:dev-prefill'),
   devReport: (line: string): void => {
     ipcRenderer.send('ledar:dev-report', String(line));

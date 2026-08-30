@@ -323,6 +323,24 @@ export function timelineSaysNothing(timeline: Timeline): boolean {
 }
 
 /**
+ * The lookup declined to aim at anything, and that is an ANSWER.
+ *
+ * 🟥 `timelineSaysNothing` is true for two different situations and a screen
+ * has to tell them apart: *the subject was not found* and *the database was
+ * never the place to look*. The first is alarming; the second is the Admit
+ * half of ideal §1 working correctly, and dressing it as a failure teaches a
+ * reader to distrust the one admission this product most needs believed.
+ *
+ * The difference is carried by `subject`, which `runTrace` leaves empty when
+ * `resolveLookup` returned null. That is a sentinel, and a renderer comparing
+ * against `''` would be a screen holding a piece of this contract's private
+ * knowledge — so it is named here instead, where the value is produced.
+ */
+export function timelineAimedNowhere(timeline: Timeline): boolean {
+  return timeline.subject === '';
+}
+
+/**
  * ④ again, for the routes nobody could walk.
  *
  * A reader shown a short timeline is entitled to know whether it is short

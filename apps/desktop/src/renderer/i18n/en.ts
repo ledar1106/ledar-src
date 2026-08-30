@@ -354,4 +354,50 @@ export const en = {
   'help.3': 'Some providers require ?sslmode=require at the end of the connection string.',
 
   'try-again': 'Try again',
+
+  // ---- S6: ask a question, and what a database can say back ---------------
+  //
+  // 🟥 Four headlines and no two alike, for the reason `_doc/25` S5 gives
+  // about verdicts: one reader in five read a near-empty report as "most of
+  // it is fine". A timeline that found nothing has exactly that shape.
+  'ask.placeholder': 'Ask about one thing that went wrong. "A customer paid and cannot see their order."',
+  'ask.send': 'Show me what would be sent',
+  'ask.confirm': 'Send it',
+  'ask.cancel': 'Do not send',
+  'ask.no-key': 'No model is configured, so nothing can be asked yet. This build has no key for the service that reads your question, and LEDAR will not invent one.',
+  'ask.no-scan': 'Nothing has been read from your database yet, so there is no map to look in. Connect and scan first.',
+
+  'ask.leaving.head': 'Before anything leaves this machine',
+  'ask.leaving.dest': 'goes to {destination}',
+  'ask.leaving.names': '{count} of your table names',
+  'ask.leaving.bytes': '{bytes} bytes of your content, in two calls',
+  'ask.leaving.rows': 'no rows from any table',
+  'ask.leaving.refuse': 'This question cannot be sent as one decision, so it will not be sent at all.',
+
+  // The four answers. Each says what it IS, never how worried to be.
+  'ask.walked': 'Here is what happened, in the order the clock recorded it.',
+  'ask.broke': 'The chain stops at {entity}.',
+  'ask.nothing': 'I found nothing at all for this subject — which is not the same as finding that nothing is wrong.',
+  'ask.outside': 'A database cannot answer this one. Here is what it would take.',
+
+  // Three absences, three sentences. Merging them sends half the readers to
+  // fix the wrong thing.
+  'ask.gap.unreached': 'never asked — the chain stopped before here',
+  'ask.gap.unwalkable': 'cannot be asked — the map records no columns to join on',
+  'ask.gap.unaffordable': 'not asked — this answer reached what it is allowed to spend',
+
+  'ask.outside.head': 'What a database cannot tell you about this',
+  // 🟥 Two keys, because one read "1 other subjects show the same break" on
+  // screen. `t()` substitutes parameters and does not inflect, so a single
+  // string cannot be right for both counts — and a sentence with a visible
+  // grammar mistake in it is a sentence a reader trusts less, which is the
+  // one thing this product cannot afford in an admission.
+  'ask.similar.one': '1 other subject shows the same break',
+  'ask.similar.many': '{count} other subjects show the same break',
+  // Counted and found none. NOT the same as nobody counting — `similar` is
+  // null for that, and this line is never reached then.
+  'ask.similar.none': 'No other subject shows the same break',
+  'ask.hop': '{entity} — {rows} rows via {via}',
+  'ask.untimed': 'no time recorded',
+  'ask.tier': 'worth its weakest hop: {tier}',
 } as const;
