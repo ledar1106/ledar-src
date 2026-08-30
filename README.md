@@ -52,32 +52,100 @@ middle of the name — Disclose and Admit — and it is enforced in the codebase
 - **Read-only. Always.** LEDAR never writes to your database. Not migrations,
   not fixes, not "just this once". The most it will ever do is print SQL for
   you to run yourself.
-- Runs on your machine. Your data does not leave it.
 - Connects through a read-only role with hard statement, lock and idle
   timeouts, because a long-running `SELECT` can stall a table during a
   migration even without write permission.
+
+### What leaves your machine, exactly
+
+**Your rows never leave.** Not a sample, not a redacted one, not a count of a
+specific person's orders.
+
+When you ask a question, LEDAR sends **table and column names** to the model
+you configured, so it can pick which part of the database your question is
+about. That is schema, not data — but it is not nothing, and calling it
+nothing would break the two letters in the middle of the name.
+
+Everything about that call is visible before it happens:
+
+- the screen names the destination, and what is in the payload, and waits
+- the permit is hashed over the exact bytes to be sent; changing one
+  identifier afterwards makes the send fail rather than proceed
+- the model never writes a sentence and never writes SQL. It picks from a
+  menu the product built. The product runs the queries and writes the words
+
+If you never ask a question, nothing is sent anywhere.
+
+---
+
+## Run it
+
+You need **Node 22 or newer** and a PostgreSQL connection string.
+
+```bash
+git clone https://github.com/ledar1106/ledar-src.git
+cd ledar-src
+npm ci
+npm run desktop
+```
+
+The first `npm run desktop` downloads the Electron binary (about 100 MB) —
+Electron 44 has no postinstall step, so `npm ci` does not fetch it. It happens
+once and the launcher does it for you.
+
+Then: paste a connection string, and LEDAR proves the connection is read-only
+before it reads anything. Scanning, the entity map and the interview all work
+with no AI configured at all.
+
+To ask questions in plain language you supply your own model key — any
+endpoint that speaks the OpenAI `/chat/completions` shape. The app asks for it
+at the moment it first needs one, and stores it with the operating system's
+own encryption (DPAPI on Windows). If the OS cannot encrypt, it refuses to
+store the key rather than writing it to a file in the clear.
+
+Also runs headless:
+
+```bash
+npm run check:db "postgres://..."   # prove the role is read-only
+npm run scan     "postgres://..."   # scan, and write the history
+npm run diff                        # what changed between two scans
+npm test                            # needs Docker for the fixture databases
+npm run test:offline                # 675 tests, no Docker needed
+```
 
 ---
 
 ## Status
 
-**Pre-release. There is no product code in this repository yet, and that is
-deliberate.**
+**Pre-1.0, and usable today.** Roughly 31,000 lines of product code in this
+repository, about 1,170 tests, and a packaged Windows build that has passed
+the Windows App Certification Kit.
 
-The project is in a field-measurement phase: connecting to real databases
-belonging to real people, and measuring whether the signal this product
-depends on actually exists. Building before that answer is known would mean
-risking building the right thing for nobody.
+What works:
 
-Three questions are open, and none of them have been answered yet:
+- connect, with the read-only guarantee proven rather than asserted
+- scan a real schema (94 tables on the Pagila sample, 368 subjects on
+  MusicBrainz) and keep the history
+- an entity map built from declared foreign keys, plus implicit ones that are
+  measured and marked as measured, never guessed silently
+- a fixed interview that turns what you know into a project profile
+- ask a question and get a timeline back, with the routes it could not afford
+  to walk named rather than dropped
 
-1. Do real databases contain enough findings that their owners did not
-   already know about?
-2. Does the AI layer cost less to run than it can be sold for?
-3. Will anyone pay for it?
+What is not done:
 
-Code lands here when the first question is answered with measurements rather
-than opinions.
+- **Not in the Microsoft Store yet.** The package passes WACK, but the Store
+  identity, the privacy policy URL and the certification notes are unwritten.
+  Until then this is a source checkout, not an installer.
+- macOS and Linux are untested. The code has no Windows-only logic that we
+  know of, and "that we know of" is the honest size of that claim.
+- Only PostgreSQL.
+- The question-answering layer is measured on Pagila and MusicBrainz. It has
+  not been run against a schema nobody here has seen.
+
+Measurements, including the ones that came out badly, are in the private
+repository's field log. Where a number appears here it came from a tool, not
+from a commit message.
 
 ---
 
@@ -102,8 +170,14 @@ Read the licence rather than this summary — the licence is what binds.
 
 ## Contributing
 
-There is no product code to send a pull request against yet. Issues and
-discussion are open.
+There is product code here now, so pull requests are real. `npm ci` and
+`npm run test:offline` need nothing but Node; the full suite needs Docker
+for the fixture databases.
+
+One expectation, and it is the house style rather than a formality: a
+change that alters what the product claims should come with the check that
+would have caught it being wrong, and that check should have been seen to
+fail before it passed.
 
 The contributor agreement is already decided, because deciding it after the
 first contribution arrives does not work: LEDAR uses the **Developer

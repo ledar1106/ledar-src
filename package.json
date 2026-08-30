@@ -16,6 +16,7 @@
   "scripts": {
     "typecheck": "tsc --build && tsc -p tsconfig.test.json",
     "check:db": "tsx packages/connector-postgres/src/cli.ts",
+    "desktop": "tsc --build apps/desktop && node apps/desktop/start.mjs",
     "scan": "tsx apps/cli/src/scan.ts",
     "diff": "tsx apps/cli/src/diff.ts",
     "export:evidence": "tsx apps/cli/src/export-evidence.ts",
