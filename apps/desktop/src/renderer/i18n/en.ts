@@ -23,6 +23,15 @@ export const en = {
   // Which build this is. Read out so that a fault can be reported against
   // a version rather than against "the app".
   'app.version': 'Version {version}',
+  // 🟥 The two fields on the egress screen. Said out loud rather than left to
+  // a placeholder, because a placeholder that reads `customer_id` looks like a
+  // value somebody already put there.
+  'ask.row.hint':
+    'One more thing before this goes: which one is this about? Give me a column that names it — often something ending in _id — and the value you are looking for.',
+  'ask.row.column': 'column',
+  'ask.row.column.example': 'e.g. customer_id',
+  'ask.row.value': 'value',
+  'ask.row.value.example': 'e.g. 1',
   'status.none': 'Not connected',
   'status.enforced': 'Read-only — enforced',
   'status.writable': 'Can still write',

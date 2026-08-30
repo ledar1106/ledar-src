@@ -1833,15 +1833,33 @@ function renderPreview(question: string, preview: AskPreview): void {
   names.append(codeBlock(preview.identifiers.join('\n')));
   bubble.append(names);
 
+  // 🟥 Three things wrong with this pair, all found by driving the window.
+  //
+  // ① The placeholders read `customer_id` and `1`, in grey. They look like
+  //    values somebody already filled in, so pressing Send straight away is
+  //    the obvious first move — and it used to kill the button for good.
+  //    `e.g.` cannot be read as a value.
+  // ② Nothing visible said what the two boxes were for. The `aria-label`s
+  //    did, which helps a screen reader and nobody else.
+  // ③ Those labels were English string literals rather than catalogue keys,
+  //    so they were the two strings on this screen that could never be
+  //    translated — and `i18n.test.ts` cannot see a string it was never told
+  //    about.
+  //
+  // ⚠️ What this does NOT fix: naming a column is still a developer's
+  // question, and it is still asked about a table nobody has chosen yet.
+  // Field result 50 records the attempt to remove it and why that was wrong.
+  bubble.append(el('p', 'field-hint', t('ask.row.hint')));
+
   const row = el('div', 'actions');
   const key = el('input', 'inline-input');
   key.type = 'text';
-  key.placeholder = 'customer_id';
-  key.setAttribute('aria-label', 'which column identifies the row');
+  key.placeholder = t('ask.row.column.example');
+  key.setAttribute('aria-label', t('ask.row.column'));
   const value = el('input', 'inline-input');
   value.type = 'text';
-  value.placeholder = '1';
-  value.setAttribute('aria-label', 'which row');
+  value.placeholder = t('ask.row.value.example');
+  value.setAttribute('aria-label', t('ask.row.value'));
   const send = el('button', 'button primary', t('ask.confirm'));
   send.type = 'button';
   const cancel = el('button', 'button', t('ask.cancel'));
@@ -1874,7 +1892,20 @@ function renderPreview(question: string, preview: AskPreview): void {
     announce(t('ask.cancel'));
   });
 
-  row.append(key, value, send, cancel);
+  // Two rows on purpose. With the labels added, one row wrapped and left
+  // `Do not send` orphaned on a line of its own, which reads like a mistake
+  // rather than a choice. The fields belong together; the two decisions belong
+  // together.
+  const fields = el('div', 'field-row');
+  fields.append(
+    el('span', 'gap-label', t('ask.row.column')),
+    key,
+    el('span', 'gap-label', t('ask.row.value')),
+    value,
+  );
+  bubble.append(fields);
+
+  row.append(send, cancel);
   bubble.append(row);
   chat.scrollTop = chat.scrollHeight;
 }
