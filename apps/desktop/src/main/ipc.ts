@@ -13,23 +13,24 @@
  * boundary exists to not rely on.
  */
 
-import { clipboard, ipcMain } from 'electron';
+import { app, clipboard, ipcMain } from 'electron';
 import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron';
 
 import { AreaAnswer, ProfileArea } from '@ledar/contracts';
 
 import { CHANNELS } from '../shared/ipc.js';
 import type {
+  AppVersion,
   AreaReply,
   AskOutcome,
   AskPreview,
-  ModelSettings,
-  SaveModelOutcome,
   ConnectOutcome,
   DevPrefill,
   GuideBundle,
   InterviewForm,
+  ModelSettings,
   ProfileFacts,
+  SaveModelOutcome,
   ScanOutcome,
   SessionHandle,
 } from '../shared/ipc.js';
@@ -126,6 +127,14 @@ export function registerIpc(opts: {
   ipcMain.handle(CHANNELS.guide, (event): GuideBundle => {
     assertAppWindow(event);
     return guideBundle();
+  });
+
+  // Read from Electron rather than imported from a constant here. A constant
+  // would be a second place holding the version, and the one thing the
+  // handbook asks of a version is that every place holding it agrees.
+  ipcMain.handle(CHANNELS.appVersion, (event): AppVersion => {
+    assertAppWindow(event);
+    return { version: app.getVersion() };
   });
 
   // Takes nothing, so there is nothing from the renderer to validate. The

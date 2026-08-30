@@ -2207,6 +2207,14 @@ function bootChrome(): void {
   byId('status-label', HTMLSpanElement).textContent = t('status.label');
   setStatus('none');
 
+  // 🟥 Which build this is, where somebody can read it without being asked to
+  // go and find it. Empty until the answer arrives rather than showing a
+  // guess: a version this window invented would be the one thing on screen
+  // that no measurement produced.
+  void window.ledar.appVersion().then(({ version }) => {
+    byId('app-version', HTMLParagraphElement).textContent = t('app.version', { version });
+  });
+
   byId('composer-label', HTMLLabelElement).textContent = t('composer.label');
   const composerInput = byId('composer-input', HTMLInputElement);
   composerInput.placeholder = t('composer.waiting');

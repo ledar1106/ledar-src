@@ -20,6 +20,9 @@ export const en = {
   'brand.word.retain': 'Retain',
 
   'status.label': 'Connection',
+  // Which build this is. Read out so that a fault can be reported against
+  // a version rather than against "the app".
+  'app.version': 'Version {version}',
   'status.none': 'Not connected',
   'status.enforced': 'Read-only — enforced',
   'status.writable': 'Can still write',

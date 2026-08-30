@@ -21,18 +21,19 @@
  */
 
 import type {
+  AppVersion,
+  AreaReply,
   AskOutcome,
   AskPreview,
-  ModelSettings,
-  SaveModelOutcome,
   ConnectOutcome,
   DevPrefill,
-  AreaReply,
   GuideBundle,
   InterviewForm,
   LedarBridge,
+  ModelSettings,
   ProfileArea,
   ProfileFacts,
+  SaveModelOutcome,
   ScanOutcome,
   SessionHandle,
 } from '../shared/ipc.js';
@@ -43,6 +44,7 @@ const { contextBridge, ipcRenderer } = electron;
 
 const api: LedarBridge = {
   guide: (): Promise<GuideBundle> => ipcRenderer.invoke('ledar:guide'),
+  appVersion: (): Promise<AppVersion> => ipcRenderer.invoke('ledar:app-version'),
   connect: (dsn: string): Promise<ConnectOutcome> =>
     ipcRenderer.invoke('ledar:connect', String(dsn)),
   scan: (session: SessionHandle): Promise<ScanOutcome> =>

@@ -47,6 +47,7 @@ import type {
 export const CHANNELS = {
   /** The SQL shown before any connection exists: create-role and undo. */
   guide: 'ledar:guide',
+  appVersion: 'ledar:app-version',
   /** Connect, interrogate the database about itself, hand back the verdict. */
   connect: 'ledar:connect',
   /** Copy text via the OS clipboard. Lives in main so the renderer needs no permission. */
@@ -154,6 +155,26 @@ export type ConnectOutcome =
     };
 
 /** The create-role and undo SQL shown in the guide, before any connection exists. */
+/**
+ * Which build this is.
+ *
+ * 🟥 Shown, because the MSIX handbook's submission checklist asks for the
+ * package version and the version the app reads out to AGREE, and until
+ * 2026-08-31 this app read it out nowhere at all. A reviewer who cannot see
+ * which build they are looking at cannot report a fault against one, and
+ * neither can somebody writing a support mail.
+ *
+ * One source, all the way down: `apps/desktop/package.json` is the version;
+ * `infra/pack-msix/build.mjs` writes it into the packaged app AND refuses to
+ * build unless `AppxManifest.xml` carries the same number with `.0` after it.
+ * `app.getVersion()` reads that same file in both a dev run and an installed
+ * one, so there is no second place to keep in step.
+ */
+export type AppVersion = {
+  /** Three parts, as the app reads it: `1.0.0`. */
+  readonly version: string;
+};
+
 export type GuideBundle = {
   roleSql: string;
   revokeSql: string;
@@ -566,6 +587,8 @@ export type AskOutcome =
 /** The API `window.ledar` exposes. The preload bridge implements exactly this. */
 export type LedarBridge = {
   guide(): Promise<GuideBundle>;
+  /** Which build this is, for the sidebar. */
+  appVersion(): Promise<AppVersion>;
   connect(dsn: string): Promise<ConnectOutcome>;
   scan(session: SessionHandle): Promise<ScanOutcome>;
   copyText(text: string): Promise<boolean>;
