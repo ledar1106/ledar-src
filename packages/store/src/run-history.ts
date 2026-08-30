@@ -273,6 +273,20 @@ export class RunHistory {
     ];
   }
 
+  /**
+   * The one line that only belongs on a NEW file.
+   *
+   * Debt N54's second half. Said on run 1 and not on every scan after it: a
+   * four-line paragraph repeated at the foot of every report is how a reader
+   * learns to skip the foot of every report. Run 1 is also exactly when a new
+   * file exists — a retirement starts the numbering again, so a moved history
+   * gets the sentence about its replacement too.
+   */
+  private uninstallLine(): string[] {
+    if (this.recorded !== 1) return [];
+    return [this.t('history.survives-uninstall', { file: this.file })];
+  }
+
   /** Said in the report either way. Silence would be the one bad answer. */
   lines(): string[] {
     const moved = this.retirementLines();
@@ -284,6 +298,7 @@ export class RunHistory {
         // is always a run number, but that is an invariant of how the two
         // fields are set together rather than one the type carries.
         this.t('history.recorded', { run: this.recorded ?? 0, file: this.file }),
+        ...this.uninstallLine(),
       ];
     }
 
@@ -299,6 +314,7 @@ export class RunHistory {
     // clean one later.
     return [
       ...moved,
+      ...this.uninstallLine(),
       this.t('history.unfinished', {
         // Reached only when `recorded` is non-null - the branch above returns
         // for the null case - but the compiler cannot see that across the two

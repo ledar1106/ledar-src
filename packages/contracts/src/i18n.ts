@@ -149,6 +149,7 @@ export type MessageKey =
   | 'history.holds-nothing'
   | 'history.holds-uncounted'
   | 'history.delete-freely'
+  | 'history.survives-uninstall'
   // ---- the verdict ----
   | 'verdict.nothing-seen'
   | 'verdict.nothing-seen.all-empty'

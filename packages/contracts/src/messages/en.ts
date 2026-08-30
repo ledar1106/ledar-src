@@ -144,6 +144,23 @@ export const EN: Catalog = {
   'history.holds-uncounted': () => 'its contents could not be counted',
   'history.delete-freely': () =>
     'Delete it whenever you like. Nothing here will touch it again.',
+  /**
+   * Said once, when the file is created, and this is debt N54's second half.
+   *
+   * Removing LEDAR used to take the scan history with it, because a packaged
+   * build wrote into the package's own container and uninstalling deletes
+   * that container. The manifest now excludes this one directory, which is
+   * right — a history is the person's record of their database, not the app's
+   * cache, and the CLI has always kept it there.
+   *
+   * 🟥 But it IS a change in behaviour, and an uninstall that quietly leaves
+   * files behind is a surprise rather than a decision. A product whose middle
+   * letters are Disclose and Admit does not get to make that one silently.
+   */
+  'history.survives-uninstall': (p) =>
+    `         this file stays if you uninstall LEDAR — it is your record of\n` +
+    `         your database, not this app's cache. Delete ${s(p, 'file')}\n` +
+    `         when you want it gone.`,
 
   // ---- the verdict ----
   'verdict.nothing-seen': () =>
