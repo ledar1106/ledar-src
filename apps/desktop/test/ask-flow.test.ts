@@ -193,15 +193,43 @@ describe('a refusal has to say whether anything was sent', () => {
     assert.ok(sendLine > 0, 'the send call moved; this test is reading the wrong file');
 
     const returns = [...source.matchAll(/kind: 'unavailable'/g)];
-    // Ten today. The number is asserted so that adding an eleventh has to come
-    // through here rather than inheriting whatever the copied line said.
+    // Ten today. The number is asserted so that adding an eleventh has to
+    // come through here rather than inheriting whatever the copied line said —
+    // and it has already earned that: an eleventh was added on 2026-08-31 and
+    // this line went red for it, which is how the change got read before it
+    // shipped. (That change was then withdrawn; see field result 50.)
     assert.equal(returns.length, 10);
+
+    /**
+     * The object literal this `kind` belongs to, to its own closing brace.
+     *
+     * 🟥 Counted, not `indexOf('}')`. The first version took the next brace,
+     * and on 2026-08-31 a refusal whose sentence interpolates `${aimedAt}`
+     * ended the slice at the template's closing brace — three lines before
+     * the `sent` it was looking for. The test reported a missing field that
+     * was there.
+     *
+     * ⚠️ Brace counting assumes braces balance, which holds here because the
+     * only ones inside these literals are template interpolations. A literal
+     * containing an unmatched brace in a string would break it, and there is
+     * none.
+     */
+    const literalAt = (at: number): string => {
+      let depth = 1;
+      for (let i = at; i < source.length; i += 1) {
+        const c = source[i];
+        if (c === '{') depth += 1;
+        else if (c === '}') {
+          depth -= 1;
+          if (depth === 0) return source.slice(at, i);
+        }
+      }
+      return source.slice(at);
+    };
 
     for (const match of returns) {
       const at = match.index!;
-      // The object literal this `kind` belongs to, up to its closing brace.
-      const end = source.indexOf('}', at);
-      const literal = source.slice(at, end);
+      const literal = literalAt(at);
       assert.match(
         literal,
         /sent: (true|false)/,
