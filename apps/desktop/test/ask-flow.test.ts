@@ -169,3 +169,52 @@ describe('what the gate says, and what a person is told', () => {
     assert.match(said, /nothing about your data follows/);
   });
 });
+
+describe('a refusal has to say whether anything was sent', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const whole = readFileSync(resolve(here, '../src/main/ask-flow.ts'), 'utf8');
+  // askSend only. `askPreview` returns an `AskPreview`, whose `unavailable`
+  // carries a `reason` and never sends anything, so counting its returns here
+  // would be counting a different type's cases against this rule.
+  const source = whole.slice(whole.indexOf('export async function askSend('));
+
+  /**
+   * The two model calls, as a position in the file.
+   *
+   * Everything `askSend` returns above this line refused before a byte left
+   * the machine; everything below it refused after the calls were paid for.
+   * The window re-enables Send only for the first group, so a refusal filed
+   * on the wrong side is either a dead button or an invitation to spend
+   * again without saying so.
+   */
+  const sendLine = source.indexOf('askLookupInTwoRounds(');
+
+  it('🟥 every unavailable outcome carries the fact', () => {
+    assert.ok(sendLine > 0, 'the send call moved; this test is reading the wrong file');
+
+    const returns = [...source.matchAll(/kind: 'unavailable'/g)];
+    // Ten today. The number is asserted so that adding an eleventh has to come
+    // through here rather than inheriting whatever the copied line said.
+    assert.equal(returns.length, 10);
+
+    for (const match of returns) {
+      const at = match.index!;
+      // The object literal this `kind` belongs to, up to its closing brace.
+      const end = source.indexOf('}', at);
+      const literal = source.slice(at, end);
+      assert.match(
+        literal,
+        /sent: (true|false)/,
+        `an unavailable outcome near offset ${at} does not say whether it sent anything`,
+      );
+      const spent = /sent: true/.test(literal);
+      assert.equal(
+        spent,
+        at > sendLine,
+        at > sendLine
+          ? `a refusal after the calls claims nothing was sent (offset ${at})`
+          : `a refusal before the calls claims it sent something (offset ${at})`,
+      );
+    }
+  });
+});

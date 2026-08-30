@@ -64,6 +64,7 @@
 // type below is safe and the function was not. `check-renderer-imports.py` is
 // the gate that now says so before a window has to.
 import type { Timeline } from '@ledar/contracts';
+import type { AskOutcome } from '../shared/ipc.js';
 
 export type AskKind = 'walked' | 'broke' | 'nothing' | 'outside';
 
@@ -242,4 +243,33 @@ export function answerIsWhole(timeline: Timeline): boolean {
     timeline.unaffordable.length === 0 &&
     timeline.cutShort === null
   );
+}
+
+/**
+ * Whether the person's agreement to send has been used up.
+ *
+ * The screen shows one Send button per question, and pressing it disables the
+ * button so nobody sends twice by accident. What that misses is that some
+ * refusals happen before anything leaves the machine — `askSend` checks the
+ * question, the model settings, the row, and the session all before it
+ * connects to anything. After one of those, nothing was spent and the button
+ * has to come back.
+ *
+ * 🟥 It did not. Driving the real window on 2026-08-31: the row fields carry
+ * placeholders that read like values — `customer_id` and `1`, in grey — so
+ * pressing Send with them empty is the obvious first move. The refusal
+ * *"Which row this is about was not given."* arrived, correctly, having sent
+ * nothing. Send and Cancel stayed disabled. Filling both fields in and
+ * pressing Send did nothing, forever; the only way out was to retype the
+ * whole question. `verify.py` counts dead controls in a package, and a
+ * control that dies only after a particular refusal is not one it can see.
+ *
+ * ⚠️ NOT simply "did it fail". Two of the refusals arrive after the two calls
+ * have been paid for, and a Send button that came back there would offer to
+ * spend again while looking exactly like the first one. The main side reports
+ * which happened; this reads it rather than guessing.
+ */
+export function agreementSpent(outcome: AskOutcome): boolean {
+  if (outcome.kind === 'answered') return true;
+  return outcome.sent;
 }

@@ -304,6 +304,7 @@ export function registerIpc(opts: {
           why: 'This session is not open. Connect again.',
           provenance: null,
           detail: null,
+          sent: false,
         };
       }
       if (asking) {
@@ -312,6 +313,7 @@ export function registerIpc(opts: {
           why: 'A question is already being asked. Wait for it.',
           provenance: null,
           detail: null,
+          sent: false,
         };
       }
       asking = true;

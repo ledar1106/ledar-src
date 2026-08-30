@@ -133,10 +133,20 @@ export function provenanceNote(p: TargetProvenance): string | null {
       : ` It also named ${p.othersNamed.join(', ')}, which ${
           p.othersNamed.length === 1 ? 'was' : 'were'
         } not used.`;
+  // 🟥 "the words in the question", NOT "the words you were sent".
+  //
+  // Read on a real screen for the first time on 2026-08-31, and the earlier
+  // wording said *"the target came from the words you were sent"*. Somebody
+  // who typed their own question was sent nothing by anybody, so the sentence
+  // asserted a thing this code cannot know — whether the words are the
+  // reader's own — in the middle of a note whose whole value is that it only
+  // states what it observed. The last sentence already asks that question
+  // properly, and asking is the correct form: a reader who wrote the words
+  // reads it and moves on, and one who pasted them from a ticket stops.
   return (
     `The question itself named ${p.subject}, spelled the way it appears in your ` +
     `schema rather than the way people write. That is where this answer was ` +
-    `aimed, so the target came from the words you were sent and not from the ` +
-    `map.${others} Worth a look if you did not write those words yourself.`
+    `aimed, so the target came from the wording of the question and not from ` +
+    `the map.${others} Worth a look if those words are not yours.`
   );
 }

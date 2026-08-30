@@ -50,7 +50,7 @@ import {
 } from './interview.js';
 import type { AnswerResult, Interview } from './interview.js';
 import { EVERY_RUNG, shapeForDirection, shapeForRung } from './profile-shape.js';
-import { askGaps, askShape, mustShow } from './ask-shape.js';
+import { agreementSpent, askGaps, askShape, mustShow } from './ask-shape.js';
 import { looksLikeSecret } from '../shared/key-shape.js';
 import { shapeFor } from './verdict-shape.js';
 import type { VerdictShape } from './verdict-shape.js';
@@ -1850,7 +1850,21 @@ function renderPreview(question: string, preview: AskPreview): void {
   send.addEventListener('click', () => {
     send.disabled = true;
     cancel.disabled = true;
-    void runAsk(question, key.value.trim(), value.value.trim());
+    // 🟥 Re-enabled when nothing left the machine. Pressing Send with the row
+    // fields empty is the obvious first move — their placeholders read
+    // `customer_id` and `1`, which look like values — and `askSend` refuses
+    // before it connects to anything. Until this, that refusal left Send and
+    // Cancel disabled forever: the person filled the fields in, pressed a dead
+    // button, and the only way out was to retype the whole question.
+    //
+    // Not re-enabled unconditionally. A refusal that arrives AFTER the two
+    // calls have been paid for is a different thing, and a live button there
+    // would offer to spend again while looking identical.
+    void runAsk(question, key.value.trim(), value.value.trim()).then((spent) => {
+      if (spent) return;
+      send.disabled = false;
+      cancel.disabled = false;
+    });
   });
   cancel.addEventListener('click', () => {
     send.disabled = true;
@@ -2121,13 +2135,34 @@ function renderAnswer(outcome: AskOutcome): void {
   chat.scrollTop = chat.scrollHeight;
 }
 
-async function runAsk(question: string, key: string, value: string): Promise<void> {
-  if (session === null) return;
+/**
+ * Asks, draws the answer, and reports whether the agreement was SPENT.
+ *
+ * True means the exchange happened — answered, or failed after the calls were
+ * made. False means nothing left the machine and the person may correct what
+ * they typed and press Send again. The distinction comes from the main side
+ * on `AskOutcome`, not from guessing here: only the side that does the
+ * sending knows whether it got that far.
+ */
+async function runAsk(question: string, key: string, value: string): Promise<boolean> {
+  if (session === null) return false;
   askInFlight = true;
   try {
-    renderAnswer(await window.ledar.askSend(session, question, key, value));
+    const outcome = await window.ledar.askSend(session, question, key, value);
+    renderAnswer(outcome);
+    return agreementSpent(outcome);
   } catch (err) {
-    renderAnswer({ kind: 'unavailable', why: String(err), provenance: null, detail: null });
+    // The bridge itself threw, so this window cannot know how far the call
+    // got. Treated as spent: offering a fresh Send after an unknown outcome
+    // is offering to spend again on a guess.
+    renderAnswer({
+      kind: 'unavailable',
+      why: String(err),
+      provenance: null,
+      detail: null,
+      sent: true,
+    });
+    return true;
   } finally {
     askInFlight = false;
   }

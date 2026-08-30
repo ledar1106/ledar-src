@@ -538,6 +538,29 @@ export type AskOutcome =
        * lookup needs to know it was aimed somewhere their question named.
        */
       provenance: string | null;
+      /**
+       * Whether anything actually left the machine before this failed.
+       *
+       * 🟥 Added 2026-08-31 because the window had no way to tell, and the
+       * consequence was a DEAD BUTTON. Driving the real app: the two row
+       * fields carry placeholders that look like values — `customer_id` and
+       * `1`, in grey — so pressing Send with them empty is the obvious first
+       * move. `askSend` refuses before it connects to anything, correctly,
+       * with *"Which row this is about was not given."* But the window had
+       * disabled Send and Cancel on the click and re-enabled neither. Filling
+       * the fields in and pressing Send again did nothing, forever. The only
+       * way out was to type the whole question a second time.
+       *
+       * The window cannot simply re-enable on every failure either: some of
+       * these refusals happen AFTER two calls have been paid for, and a live
+       * button there would offer to spend again with no hint that it would.
+       *
+       * So the fact travels with the outcome instead of being guessed at.
+       * False means nothing was sent and the agreement is still unspent —
+       * the person may correct what they typed and press Send. True means
+       * the exchange happened; asking again is a new question.
+       */
+      sent: boolean;
     };
 
 /** The API `window.ledar` exposes. The preload bridge implements exactly this. */

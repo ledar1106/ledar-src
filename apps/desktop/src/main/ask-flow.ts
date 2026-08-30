@@ -307,7 +307,7 @@ export async function askSend(
 ): Promise<AskOutcome> {
   const question = cleanQuestion(rawQuestion);
   if (question === null) {
-    return { kind: 'unavailable', why: 'That is not a question.', provenance: null, detail: null };
+    return { kind: 'unavailable', why: 'That is not a question.', provenance: null, detail: null, sent: false };
   }
   // Checked again here, and not only in `askPreview`. This is the function
   // that sends; a guard that lives only on the path before it is a guard the
@@ -318,31 +318,32 @@ export async function askSend(
       why: 'That looks like an API key rather than a question. Nothing was sent.',
       provenance: null,
       detail: null,
+      sent: false,
     };
   }
 
   const config = modelConfig();
   if (config === null) {
-    return { kind: 'unavailable', why: 'No model is configured in this build.', provenance: null, detail: null };
+    return { kind: 'unavailable', why: 'No model is configured in this build.', provenance: null, detail: null, sent: false };
   }
   const tier = config.tiers[TIER];
-  if (tier === undefined) return { kind: 'unavailable', why: 'No model is configured.', provenance: null, detail: null };
+  if (tier === undefined) return { kind: 'unavailable', why: 'No model is configured.', provenance: null, detail: null, sent: false };
 
   const key = typeof rawKey === 'string' && rawKey.length > 0 && rawKey.length < 128 ? rawKey : null;
   const value =
     typeof rawValue === 'string' && rawValue.length > 0 && rawValue.length < 256 ? rawValue : null;
   if (key === null || value === null) {
-    return { kind: 'unavailable', why: 'Which row this is about was not given.', provenance: null, detail: null };
+    return { kind: 'unavailable', why: 'Which row this is about was not given.', provenance: null, detail: null, sent: false };
   }
 
   const dsn = dsnFor(handle);
-  if (dsn === null) return { kind: 'unavailable', why: 'This session is not open. Connect again.', provenance: null, detail: null };
+  if (dsn === null) return { kind: 'unavailable', why: 'This session is not open. Connect again.', provenance: null, detail: null, sent: false };
 
   const client = await connectReadOnly({ dsn });
   try {
     const verdict = await inspectPrivileges(client, SCHEMAS);
     if (verdict.kind !== 'read_only_enforced') {
-      return { kind: 'unavailable', why: 'This login can write to the database now. Nothing was sent.', provenance: null, detail: null };
+      return { kind: 'unavailable', why: 'This login can write to the database now. Nothing was sent.', provenance: null, detail: null, sent: false };
     }
     const offer = lookupOffer(graphFrom(await readSchemaGraph(client, SCHEMAS)));
 
@@ -351,7 +352,7 @@ export async function askSend(
     // could have added a route whose endpoint is not a subject. One decision
     // covering two calls is only sound while this holds.
     const envelope = askEnvelope(question, offer, destinationOf(config));
-    if (!envelope.stayedInside) return { kind: 'unavailable', why: envelopeNote(envelope), provenance: null, detail: null };
+    if (!envelope.stayedInside) return { kind: 'unavailable', why: envelopeNote(envelope), provenance: null, detail: null, sent: false };
 
     const calls: CallRecord[] = [];
     const now = new Date().toISOString();
@@ -396,6 +397,9 @@ export async function askSend(
         why: readerSentenceFor(out.why),
         provenance: null,
         detail: out.why,
+        // The calls were made. Offering Send again here would offer to spend
+        // again, and the window has no way to know that unless it is told.
+        sent: true,
       };
     }
 
@@ -434,7 +438,7 @@ export async function askSend(
           : `This was aimed at ${aimedAt}, and asking there for ${key} did not ` +
             `work: ${readableDbError(err)} Nothing was counted, and nothing about your ` +
             `data follows from that.`;
-      return { kind: 'unavailable', why, provenance, detail: null };
+      return { kind: 'unavailable', why, provenance, detail: null, sent: true };
     }
 
     return {

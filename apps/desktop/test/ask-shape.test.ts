@@ -13,7 +13,15 @@ import { describe, it } from 'node:test';
 import { timelineFrom } from '@ledar/contracts';
 import type { EntityEdge, HopResult, Timeline } from '@ledar/contracts';
 
-import { answerIsWhole, askGaps, askKind, askShape, mustShow } from '../src/renderer/ask-shape.js';
+import {
+  agreementSpent,
+  answerIsWhole,
+  askGaps,
+  askKind,
+  askShape,
+  mustShow,
+} from '../src/renderer/ask-shape.js';
+import type { AskOutcome } from '../src/shared/ipc.js';
 
 function edge(): EntityEdge {
   return {
@@ -185,6 +193,43 @@ describe('the two notes no shape may swallow', () => {
         ),
       ),
       false,
+    );
+  });
+});
+
+describe('the Send button after a refusal', () => {
+  function refused(sent: boolean): AskOutcome {
+    return { kind: 'unavailable', why: 'no', provenance: null, detail: null, sent };
+  }
+
+  it('🟥 comes back when nothing left the machine', () => {
+    // The bug this exists for: pressing Send with the row fields empty is the
+    // obvious first move, because their placeholders read `customer_id` and
+    // `1`. askSend refuses before it connects to anything. Until 2026-08-31
+    // Send and Cancel stayed disabled after that, so filling the fields in and
+    // pressing again did nothing, forever, and the only way out was to retype
+    // the whole question.
+    assert.equal(agreementSpent(refused(false)), false);
+  });
+
+  it('🟥 stays gone when the calls were already paid for', () => {
+    // Not "did it fail". Two refusals arrive AFTER the two calls, and a Send
+    // button that came back there would offer to spend again while looking
+    // exactly like the first one.
+    assert.equal(agreementSpent(refused(true)), true);
+  });
+
+  it('stays gone when an answer arrived', () => {
+    assert.equal(
+      agreementSpent({
+        kind: 'answered',
+        timeline: walked(),
+        provenance: null,
+        aimedNowhere: false,
+        costMicros: null,
+        calls: 2,
+      }),
+      true,
     );
   });
 });
