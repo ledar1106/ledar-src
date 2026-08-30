@@ -82,8 +82,8 @@ describe('the four answers, and no two alike', () => {
   });
 
   it('🟥 an empty timeline carries NO success styling and the only banner', () => {
-    // RỖNG ≠ SẠCH. Zero hops is what a healthy subject and a missing subject
-    // both produce, and this card is the only thing standing between them.
+    // Empty is not clean. Zero hops is what a healthy subject and a missing
+    // subject both produce, and this card is the only thing between them.
     const s = askShape(nothing(), false);
     assert.notEqual(s.tone, 'ok');
     assert.notEqual(s.icon, 'check');

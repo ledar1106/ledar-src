@@ -1,8 +1,8 @@
 /**
  * How each of the four answers G3 can give is allowed to look. No DOM here.
  *
- * `verdict-shape.ts` earned this file's rules the expensive way. `_doc/25` S5:
- * *"Phán quyết có BỐN hình dạng, không hai cái nào được trông giống nhau"* —
+ * `verdict-shape.ts` earned this file's rules the expensive way. `_doc/25` S5
+ * asks for FOUR verdict shapes with no two alike,
  * and the measurement behind it is that one reader in five read a near-empty
  * report as *"most of the database is fine"*. A timeline has exactly the same
  * trap and one more besides, because a timeline that found nothing looks like
@@ -130,7 +130,7 @@ const SHAPES: Record<AskKind, Omit<AskShape, 'kind'>> = {
    *
    * Zero hops is produced by a subject that is fine AND by a subject that is
    * not there, and a reader who skims will take the short answer for the good
-   * one. `_doc/25` 3.3 ③: RỖNG ≠ SẠCH.
+   * one. `_doc/25` 3.3 ③: empty is not clean.
    */
   nothing: {
     tone: 'alarm',
