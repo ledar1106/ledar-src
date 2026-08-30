@@ -785,9 +785,27 @@ export async function runImplicitForeignKeys(
   /**
    * Records what the counting said about one candidate.
    *
-   * Called at every point where a count exists and the loop is about to move
-   * on — which is the same set of points `verified` is incremented at, and
-   * that is not a coincidence: a verdict IS the record of having verified.
+   * 🟥 The sentence that used to be here said this is called *"at the same set
+   * of points `verified` is incremented at"*. That is FALSE, and it was false
+   * when it was written. `verified` is also incremented for a column that came
+   * back with no rows on the exact path, where there is nothing to say a
+   * verdict about — so `verdicts.length` is smaller than `candidatesVerified`
+   * whenever that happens.
+   *
+   * It is not a hypothetical. On MusicBrainz all seven candidates sit on
+   * tables the public dump ships empty: `candidatesVerified` is 7 and
+   * `verdicts` is empty. A measurement script printed both numbers side by
+   * side on 2026-08-31 and they read as a contradiction, because the comment
+   * promised they could not differ.
+   *
+   * The behaviour is right. A column with no values cannot disprove a
+   * reference, and inventing `holds: false` from an absence is the confusion
+   * `notExamined` exists to prevent. What was wrong was the invariant written
+   * above the code. The real one is:
+   *
+   *     verdicts.length + columnsWithNoRows === candidatesVerified
+   *
+   * and `layer-b.regression.test.ts` now holds it rather than a comment.
    */
   const verdict = (c: ImplicitFkCandidate, of: number, found: number, holds: boolean): void => {
     verdicts.push({

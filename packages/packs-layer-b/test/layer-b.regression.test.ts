@@ -1160,6 +1160,27 @@ if (!gate.ok) {
         );
       });
 
+      it('🟥 every checked candidate is either a verdict or an empty column', () => {
+        // The invariant a comment in `implicit-fk.ts` used to get wrong. It
+        // claimed a verdict is recorded wherever `verified` is incremented,
+        // and that skipped the empty-column exit — so the two numbers can
+        // differ, and on MusicBrainz they differ by all seven.
+        //
+        // ⚠️ This fixture has no empty candidate column, so the case that
+        // SEPARATES this assertion from the weaker `verdicts.length ===
+        // candidatesVerified` is not exercised here. It was measured by hand
+        // on MusicBrainz (field result 48): verified 7, verdicts 0, empty 7.
+        // What this bench does catch is a new exit that increments `verified`
+        // and records nothing, which is how the wrong comment came true.
+        assert.equal(
+          outcome.verdicts.length + outcome.columnsWithNoRows,
+          outcome.candidatesVerified,
+          `${outcome.verdicts.length} verdicts + ${outcome.columnsWithNoRows} ` +
+            `empty columns is not ${outcome.candidatesVerified} checked. Some ` +
+            `path counted a candidate as checked and said nothing about it.`,
+        );
+      });
+
       it('nothing counted in full is described as sampled', () => {
         // The fixture's other Layer B findings are all small tables. If this
         // number ever exceeds the number of large ones, the exact path has
