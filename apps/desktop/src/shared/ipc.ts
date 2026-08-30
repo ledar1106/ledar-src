@@ -462,9 +462,28 @@ export type AskOutcome =
       calls: number;
     }
   | {
-      /** The call did not produce a usable choice. Carries the gate's own words. */
       kind: 'unavailable';
+      /**
+       * What happened, for the person who asked.
+       *
+       * 🟥 NOT the gate's own words. `sealLookup`'s refusals are written to be
+       * read in a failing test — one of them reached a real screen saying
+       * *"VS-7 measured what discounted hedging costs · 10745ms"*, which is a
+       * field-result reference and a latency figure shown to somebody who does
+       * not understand backends and is accountable for one.
+       *
+       * The gate's sentence is not wrong and is not thrown away; it moves to
+       * `detail`, behind a control, where the person who wants it can find it.
+       */
       why: string;
+      /**
+       * The gate's own sentence, for whoever wants it. Null when there is none.
+       *
+       * Kept rather than dropped: it names which rule refused, and that is the
+       * only thing that tells a developer — or the Licensor reading a support
+       * mail — what actually happened.
+       */
+      detail: string | null;
       /**
        * 🟥 N62's note, on the FAILURE path too, and this field exists because
        * of what happened without it.

@@ -1749,12 +1749,21 @@ function enableComposer(): void {
   // first attempt at using it, teaches them the product is unresponsive —
   // and they learn that before they have read a word of what it says.
   //
-  // Only when nothing else is focused. Stealing focus from somebody already
-  // typing, or mid-way through reading a confirmation, would be worse than
-  // the bug.
-  if (document.activeElement === null || document.activeElement === document.body) {
-    input.focus();
-  }
+  // ⚠️ Not "only when nothing is focused" — that was the first guard and it was
+  // too strict. The map appears immediately after somebody presses a button,
+  // so the pressed button still holds focus and the field stayed unfocused
+  // exactly when it mattered. A button that was just clicked is not somebody
+  // typing.
+  //
+  // What must not be interrupted is a person MID-TEXT: another input, a
+  // textarea, or anything contenteditable. Those are the only things where
+  // taking focus loses work.
+  const busy = document.activeElement;
+  const typing =
+    busy instanceof HTMLInputElement ||
+    busy instanceof HTMLTextAreaElement ||
+    (busy instanceof HTMLElement && busy.isContentEditable);
+  if (!typing) input.focus();
 }
 
 /**
@@ -1865,6 +1874,18 @@ function renderAnswer(outcome: AskOutcome): void {
       bubble.append(why);
     }
     bubble.append(el('p', 'card-note', outcome.why));
+    // 🟥 The gate's own sentence, kept and put behind a control rather than
+    // shown or dropped. One of them reached a real screen reading "VS-7
+    // measured what discounted hedging costs · 10745ms" — a field-result
+    // reference and a latency figure, to somebody who does not understand
+    // backends. It is still the only thing that names WHICH rule refused, so
+    // it goes where whoever wants it can open it.
+    if (outcome.detail !== null) {
+      const more = el('details', 'evidence');
+      more.append(el('summary', undefined, t('ask.detail')));
+      more.append(codeBlock(outcome.detail));
+      bubble.append(more);
+    }
     return;
   }
 
@@ -1990,7 +2011,7 @@ async function runAsk(question: string, key: string, value: string): Promise<voi
   try {
     renderAnswer(await window.ledar.askSend(session, question, key, value));
   } catch (err) {
-    renderAnswer({ kind: 'unavailable', why: String(err), provenance: null });
+    renderAnswer({ kind: 'unavailable', why: String(err), provenance: null, detail: null });
   } finally {
     askInFlight = false;
   }

@@ -35,6 +35,7 @@
  */
 
 import {
+  applyVerdicts,
   PROFILE_AREAS,
   ProfileArea,
   conflictsIn,
@@ -46,6 +47,7 @@ import {
   scanPlanFrom,
 } from '@ledar/contracts';
 import type {
+  CountedEdge,
   AreaKnowledge,
   EntityGraph,
   GraphSource,
@@ -240,6 +242,45 @@ export function noteMap(databaseFingerprint: string, source: GraphSource, at: st
   withStore((store) => {
     store.saveMap(databaseFingerprint, map!, at);
   });
+}
+
+/**
+ * The map again, once the scan has finished counting.
+ *
+ * 🟥 A SECOND call rather than moving `noteMap` later, and the ordering is the
+ * reason. `noteMap` runs early so a map exists while the scan is still going —
+ * that is deliberate and its comment says so. Layer B's counts do not exist
+ * until the end. So the map is built from NAMES first and corrected by COUNTS
+ * after, which is exactly what the three rungs mean.
+ *
+ * What this fixes: nothing in the product ever created a `measured` edge. The
+ * rung was in the contract type, in a SQL CHECK constraint, in `pathTier`, in
+ * `timelineTier`, and beside every hop on the S6 screen — and no code path
+ * could put an edge on it, while layer B counted and discarded the numbers.
+ *
+ * Measured on Pagila: 24 declared, 11 guessed, 0 measured. After this: 24
+ * declared, 8 measured, 2 guessed, and one edge REMOVED —
+ * `damaged_external_ref.staff_id -> staff.staff_id`, which held nought of
+ * thirty values and which G3 would otherwise have walked.
+ *
+ * Silent on failure for the same reason `noteMap` is: a map that failed to
+ * save is rebuilt by the next scan at no cost, and throwing here would lose a
+ * report measured from a real database to protect a file that owes it nothing.
+ */
+export function refineMap(
+  databaseFingerprint: string,
+  verdicts: readonly CountedEdge[],
+  at: string,
+): { promoted: number; dropped: number; unmatched: number } | null {
+  if (fingerprint !== null && fingerprint !== databaseFingerprint) return null;
+  if (map === null || mapFor !== databaseFingerprint) return null;
+
+  const out = applyVerdicts(map, verdicts);
+  map = out.graph;
+  withStore((store) => {
+    store.saveMap(databaseFingerprint, out.graph, at);
+  });
+  return { promoted: out.promoted, dropped: out.dropped, unmatched: out.unmatched };
 }
 
 /**

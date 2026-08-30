@@ -273,6 +273,7 @@ export function registerIpc(opts: {
           kind: 'unavailable',
           why: 'This session is not open. Connect again.',
           provenance: null,
+          detail: null,
         };
       }
       if (asking) {
@@ -280,6 +281,7 @@ export function registerIpc(opts: {
           kind: 'unavailable',
           why: 'A question is already being asked. Wait for it.',
           provenance: null,
+          detail: null,
         };
       }
       asking = true;

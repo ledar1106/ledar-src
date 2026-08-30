@@ -147,6 +147,70 @@ export function readableDbError(err: unknown): string {
   return /[.!?]$/.test(withoutAliases) ? withoutAliases : `${withoutAliases}.`;
 }
 
+/**
+ * What a person is told when the choice could not be used.
+ *
+ * 🟥 Written from the gate's refusal rather than passing it on. One of
+ * `sealLookup`'s sentences reached a real screen reading *"…VS-7 measured what
+ * discounted hedging costs · 10745ms"* — a field-result reference and a
+ * latency figure, shown to somebody who does not understand backends and is
+ * accountable for one. Those sentences are written to be read in a failing
+ * test, and they are good at that.
+ *
+ * Every branch says the same three things in the reader's terms: what came
+ * back, why this product will not act on it, and that nothing about their data
+ * follows from it. Six sentences rather than one, because the six refusals
+ * lead a reader somewhere different and one sentence for all of them is the
+ * same as no sentence.
+ *
+ * ⚠️ The default is deliberately vague. An unrecognised refusal means a rule
+ * fired that this function has not been taught, and inventing a specific
+ * explanation for it would be worse than admitting the gap. The exact words
+ * are still carried, in `detail`.
+ */
+export function readerSentenceFor(gate: string): string {
+  const nothingFollows =
+    'Nothing was looked at, and nothing about your data follows from this.';
+  if (/names no gap/.test(gate)) {
+    return (
+      'The answer that came back said your database cannot help with this, ' +
+      'and would not say what it would take instead. A refusal with no gap ' +
+      `named is not something this product will pass on. ${nothingFollows}`
+    );
+  }
+  if (/never\s+offered/.test(gate)) {
+    return (
+      'The answer that came back pointed at something that is not in your ' +
+      `database. It was refused before any query was built. ${nothingFollows}`
+    );
+  }
+  if (/more than once/.test(gate)) {
+    return (
+      'The answer that came back asked to follow the same trail twice, which ' +
+      `would have counted the same rows twice. ${nothingFollows}`
+    );
+  }
+  if (/names nothing to look at/.test(gate)) {
+    return (
+      'The answer that came back promised your database could help and then ' +
+      `named nowhere to look. ${nothingFollows}`
+    );
+  }
+  if (/two different answers/.test(gate)) {
+    return (
+      'The answer that came back said your database cannot help and picked ' +
+      `somewhere to look anyway. Those are two different answers. ${nothingFollows}`
+    );
+  }
+  if (/shape it was asked for/.test(gate)) {
+    return `The answer that came back was not readable at all. ${nothingFollows}`;
+  }
+  return (
+    'The answer that came back could not be used, and this product will not ' +
+    `guess at what it meant. ${nothingFollows}`
+  );
+}
+
 /** A question, or nothing. Validated here because here is the boundary. */
 function cleanQuestion(raw: unknown): string | null {
   if (typeof raw !== 'string') return null;
@@ -214,30 +278,30 @@ export async function askSend(
   rawValue: unknown,
 ): Promise<AskOutcome> {
   const question = cleanQuestion(rawQuestion);
-  if (question === null) return { kind: 'unavailable', why: 'That is not a question.', provenance: null };
+  if (question === null) return { kind: 'unavailable', why: 'That is not a question.', provenance: null, detail: null };
 
   const config = modelConfig();
   if (config === null) {
-    return { kind: 'unavailable', why: 'No model is configured in this build.', provenance: null };
+    return { kind: 'unavailable', why: 'No model is configured in this build.', provenance: null, detail: null };
   }
   const tier = config.tiers[TIER];
-  if (tier === undefined) return { kind: 'unavailable', why: 'No model is configured.', provenance: null };
+  if (tier === undefined) return { kind: 'unavailable', why: 'No model is configured.', provenance: null, detail: null };
 
   const key = typeof rawKey === 'string' && rawKey.length > 0 && rawKey.length < 128 ? rawKey : null;
   const value =
     typeof rawValue === 'string' && rawValue.length > 0 && rawValue.length < 256 ? rawValue : null;
   if (key === null || value === null) {
-    return { kind: 'unavailable', why: 'Which row this is about was not given.', provenance: null };
+    return { kind: 'unavailable', why: 'Which row this is about was not given.', provenance: null, detail: null };
   }
 
   const dsn = dsnFor(handle);
-  if (dsn === null) return { kind: 'unavailable', why: 'This session is not open. Connect again.', provenance: null };
+  if (dsn === null) return { kind: 'unavailable', why: 'This session is not open. Connect again.', provenance: null, detail: null };
 
   const client = await connectReadOnly({ dsn });
   try {
     const verdict = await inspectPrivileges(client, SCHEMAS);
     if (verdict.kind !== 'read_only_enforced') {
-      return { kind: 'unavailable', why: 'This login can write to the database now. Nothing was sent.', provenance: null };
+      return { kind: 'unavailable', why: 'This login can write to the database now. Nothing was sent.', provenance: null, detail: null };
     }
     const offer = lookupOffer(graphFrom(await readSchemaGraph(client, SCHEMAS)));
 
@@ -246,7 +310,7 @@ export async function askSend(
     // could have added a route whose endpoint is not a subject. One decision
     // covering two calls is only sound while this holds.
     const envelope = askEnvelope(question, offer, destinationOf(config));
-    if (!envelope.stayedInside) return { kind: 'unavailable', why: envelopeNote(envelope), provenance: null };
+    if (!envelope.stayedInside) return { kind: 'unavailable', why: envelopeNote(envelope), provenance: null, detail: null };
 
     const calls: CallRecord[] = [];
     const now = new Date().toISOString();
@@ -285,7 +349,13 @@ export async function askSend(
     );
 
     if (out.state !== 'answered') {
-      return { kind: 'unavailable', why: out.why, provenance: null };
+      // 🟥 The gate's sentence goes to `detail`; the person reads one of ours.
+      return {
+        kind: 'unavailable',
+        why: readerSentenceFor(out.why),
+        provenance: null,
+        detail: out.why,
+      };
     }
 
     // N62, computed BEFORE the walk. Computed from the raw question, never the
@@ -323,7 +393,7 @@ export async function askSend(
           : `This was aimed at ${aimedAt}, and asking there for ${key} did not ` +
             `work: ${readableDbError(err)} Nothing was counted, and nothing about your ` +
             `data follows from that.`;
-      return { kind: 'unavailable', why, provenance };
+      return { kind: 'unavailable', why, provenance, detail: null };
     }
 
     return {

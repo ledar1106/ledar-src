@@ -91,7 +91,7 @@ import { RunHistory, databaseFingerprint, identityFrom, ruleRunsFrom } from '@le
 
 import type { ReportFinding, ScanOutcome, SessionHandle } from '../shared/ipc.js';
 import { SCHEMAS } from './connect-flow.js';
-import { currentPlan, noteMap, noteObservations } from './profile-flow.js';
+import { currentPlan, noteMap, noteObservations, refineMap } from './profile-flow.js';
 import { closeSession, dsnFor } from './session.js';
 
 /**
@@ -407,6 +407,19 @@ export async function runScanFlow(handle: unknown): Promise<ScanOutcome> {
     // `targetsNotChecked` is one of the gaps the verdict has to name, and
     // re-deriving it from the rendered sentence would mean parsing our own
     // prose back out.
+    // 🟥 The map was built from NAMES before either layer ran; layer B has now
+    // COUNTED. Applying it here promotes the guesses the values confirmed and
+    // removes the ones they disproved — measured on Pagila, one edge holding
+    // nought of thirty values that the map would otherwise have kept.
+    //
+    // After the layers and before the report, because the report's coverage
+    // numbers are about what was checked and this changes none of them.
+    // Guarded the same way `noteMap` is, and for the same reason: a database
+    // that could not be identified gets no map, so there is none to correct.
+    if (identity !== null) {
+      refineMap(databaseFingerprint(identity), layerB.verdicts, new Date().toISOString());
+    }
+
     const stripData = buildScopeStrip(manifest, [...layerA.rules, ...layerB.rules]);
     const scopeStrip = scopeStripLine(stripData, LANG);
 

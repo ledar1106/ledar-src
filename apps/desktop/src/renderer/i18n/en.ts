@@ -386,6 +386,7 @@ export const en = {
   'ask.gap.unwalkable': 'cannot be asked — the map records no columns to join on',
   'ask.gap.unaffordable': 'not asked — this answer reached what it is allowed to spend',
 
+  'ask.detail': 'What the check said, word for word',
   'ask.outside.head': 'What a database cannot tell you about this',
   // 🟥 Two keys, because one read "1 other subjects show the same break" on
   // screen. `t()` substitutes parameters and does not inflect, so a single

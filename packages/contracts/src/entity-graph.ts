@@ -808,6 +808,157 @@ export type GraphSource = {
  * name anybody points a column at, and leaving it in only gives the bare-name
  * rung more ways to be wrong.
  */
+/**
+ * What counting said about a guess. The shape `applyVerdicts` takes.
+ *
+ * Structurally identical to layer B's `EdgeVerdict` and declared here rather
+ * than imported: `@ledar/contracts` may not depend on a pack, and a pack
+ * depending on the contract is the direction that already exists.
+ */
+export type CountedEdge = {
+  readonly childSchema: string;
+  readonly childTable: string;
+  readonly childColumn: string;
+  readonly parentSchema: string;
+  readonly parentTable: string;
+  readonly parentColumn: string;
+  readonly of: number;
+  readonly found: number;
+  readonly holds: boolean;
+};
+
+/** What `applyVerdicts` did, so a caller can say it rather than assume it. */
+export type VerdictOutcome = {
+  readonly graph: EntityGraph;
+  /** Guesses the counting confirmed. They are `measured` now. */
+  readonly promoted: number;
+  /** Guesses the counting DISPROVED. They are gone. */
+  readonly dropped: number;
+  /**
+   * Verdicts that matched no edge on this map.
+   *
+   * 🟥 Counted rather than ignored, and this number is debt N57 becoming
+   * visible for the first time. `guessedEdges` (contracts) and
+   * `findCandidates` (layer B) are two copies of one naming rule, written in
+   * two places by two hands, and N57 records that they have never disagreed
+   * on any bench anybody has run — while differing in what they CAN read.
+   * A verdict with nowhere to land is that difference, measured.
+   */
+  readonly unmatched: number;
+};
+
+/**
+ * The map, corrected by what the scan actually counted.
+ *
+ * ## 🟥 Why this exists
+ *
+ * `EdgeTier` has three rungs and the product produced two. Nothing anywhere
+ * created a `measured` edge: the rung sat in the contract type, in a SQL CHECK
+ * constraint, in `pathTier`'s ranking, in `timelineTier`, and beside every hop
+ * on the S6 screen — with no code path able to put an edge on it. Meanwhile
+ * layer B was going and counting exactly that and throwing the number away.
+ *
+ * Measured on Pagila before this was written: 24 declared edges, 11 guessed,
+ * **0 measured** — and twelve counted verdicts sitting unused, one of them
+ * `damaged_external_ref.staff_id -> staff.staff_id, 0 of 30`. Zero. The map
+ * kept that edge, and G3 would have walked it.
+ *
+ * ## The two things it does, and the one it refuses
+ *
+ * ```text
+ * holds: true    a GUESS becomes `measured`, carrying its count
+ * holds: false   the guess is REMOVED — this product looked and the values
+ *                said no, and a guess that failed a check is not the same
+ *                thing as a guess nobody checked
+ * declared       untouched, always
+ * ```
+ *
+ * 🟥 A declared edge is never demoted or dropped, however the count came out.
+ * The catalogue is the database's own statement about itself; a count that
+ * disagreed with a foreign key would mean the constraint is not enforced,
+ * which is a FINDING about their system and not a reason for this product to
+ * quietly edit its map. Layer A raises that; this function stays out of it.
+ */
+export function applyVerdicts(
+  graph: EntityGraph,
+  verdicts: readonly CountedEdge[],
+): VerdictOutcome {
+  if (verdicts.length === 0) {
+    return { graph, promoted: 0, dropped: 0, unmatched: 0 };
+  }
+
+  // Keyed on all three, because a table may point at the same parent through
+  // two different columns and they can be counted differently.
+  const key = (child: string, via: string, parent: string): string =>
+    `${child}|${via}|${parent}`;
+
+  const said = new Map<string, CountedEdge>();
+  for (const v of verdicts) {
+    said.set(
+      key(
+        `${v.childSchema}.${v.childTable}`,
+        v.childColumn,
+        `${v.parentSchema}.${v.parentTable}`,
+      ),
+      v,
+    );
+  }
+
+  const landed = new Set<string>();
+  const edges: EntityEdge[] = [];
+  let promoted = 0;
+  let dropped = 0;
+
+  for (const edge of graph.edges) {
+    if (edge.tier !== 'guessed') {
+      edges.push(edge);
+      continue;
+    }
+    const k = key(refOf(edge.from), edge.via, refOf(edge.to));
+    const verdict = said.get(k);
+    if (verdict === undefined) {
+      // Nobody counted this one. It stays exactly what it was — a guess — and
+      // `pathTier` will keep saying so.
+      edges.push(edge);
+      continue;
+    }
+    landed.add(k);
+
+    if (!verdict.holds) {
+      dropped += 1;
+      continue;
+    }
+
+    promoted += 1;
+    edges.push({
+      from: edge.from,
+      to: edge.to,
+      via: edge.via,
+      // The guess's sentence, and then what counting added to it. Kept
+      // together because the reader is owed both: how it was found, and what
+      // was then true of the values.
+      why:
+        `${edge.why}; and ${verdict.found} of ${verdict.of} values in ` +
+        `${verdict.childTable}.${verdict.childColumn} were found in ` +
+        `${verdict.parentTable}.${verdict.parentColumn}`,
+      tier: 'measured',
+      matched: { of: verdict.of, found: verdict.found },
+      // 🟥 Required on a measured edge since N58, and this is where the
+      // columns come from: the verdict names both ends, so a promoted edge
+      // can be JOINED. A guess never could, which is why every route through
+      // one comes back `unwalkable`.
+      join: { from: [verdict.childColumn], to: [verdict.parentColumn] },
+    });
+  }
+
+  return {
+    graph: { edges },
+    promoted,
+    dropped,
+    unmatched: verdicts.length - landed.size,
+  };
+}
+
 export function graphFrom(source: GraphSource): EntityGraph {
   const partitionOf = new Map<string, EntityRef>();
   for (const t of source.tables) {

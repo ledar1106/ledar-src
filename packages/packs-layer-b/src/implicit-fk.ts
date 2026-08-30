@@ -569,6 +569,45 @@ export type RuledOutTarget = SealedSetAside & {
   cause: RuledOutCause;
 };
 
+/**
+ * What counting actually said about one candidate relationship.
+ *
+ * 🟥 This exists because the counting was being thrown away. `EdgeTier` has
+ * three rungs and the product produced two of them: nothing anywhere created
+ * a `measured` edge, so the rung sat in the contract type, in a SQL CHECK
+ * constraint, in `pathTier`'s ranking, in `timelineTier`, and beside every hop
+ * on the S6 screen — with no code path able to put an edge on it.
+ *
+ * Meanwhile this file was going and counting exactly that. Measured on Pagila:
+ * 24 declared edges, 11 guessed, 0 measured — and layer B had counted values
+ * for 13 candidates, one of which it DISPROVED while the map kept the guess.
+ *
+ * Structured rather than a sentence. `SetAside.target` is a string written for
+ * a person to read, and matching it back to an edge would be string parsing at
+ * the one place where being wrong means walking a relationship that does not
+ * exist.
+ */
+export type EdgeVerdict = {
+  readonly childSchema: string;
+  readonly childTable: string;
+  readonly childColumn: string;
+  readonly parentSchema: string;
+  readonly parentTable: string;
+  readonly parentColumn: string;
+  /** Values that were compared. Never zero — a verdict needs a count. */
+  readonly of: number;
+  /** How many of them were found in the parent. */
+  readonly found: number;
+  /**
+   * Whether the count supports treating this as a real reference.
+   *
+   * False is the valuable half: it means this product looked and the values
+   * say no. A guess nobody checked and a guess that was checked and failed
+   * are not the same thing, and only one of them belongs on a map.
+   */
+  readonly holds: boolean;
+};
+
 export type LayerBOutcome = {
   /**
    * `SealedFinding`, not `Finding`. Nothing in this file can build that type
@@ -578,6 +617,14 @@ export type LayerBOutcome = {
   findings: SealedFinding[];
   candidatesConsidered: number;
   candidatesVerified: number;
+  /**
+   * One per candidate whose values were actually counted.
+   *
+   * ⚠️ NOT one per candidate considered. A candidate that was never queried
+   * has no verdict, and inventing `holds: false` for it would turn a coverage
+   * hole into a disproof — the exact confusion `notExamined` exists to stop.
+   */
+  verdicts: EdgeVerdict[];
   /** Folded into their parent table rather than checked separately. */
   partitionsCovered: number;
 
@@ -732,7 +779,29 @@ export async function runImplicitForeignKeys(
   const drafts: FindingDraft[] = [];
   const notExamined: NotExaminedTarget[] = [];
   const ruledOut: RuledOutTarget[] = [];
+  const verdicts: EdgeVerdict[] = [];
   let verified = 0;
+
+  /**
+   * Records what the counting said about one candidate.
+   *
+   * Called at every point where a count exists and the loop is about to move
+   * on — which is the same set of points `verified` is incremented at, and
+   * that is not a coincidence: a verdict IS the record of having verified.
+   */
+  const verdict = (c: ImplicitFkCandidate, of: number, found: number, holds: boolean): void => {
+    verdicts.push({
+      childSchema: c.childSchema,
+      childTable: c.childTable,
+      childColumn: c.childColumn,
+      parentSchema: c.parentSchema,
+      parentTable: c.parentTable,
+      parentColumn: c.parentColumn,
+      of,
+      found,
+      holds,
+    });
+  };
 
   // One seed for the whole run, so every sampled column in one report was
   // drawn under the same conditions and two of them can be compared. It
@@ -859,7 +928,11 @@ export async function runImplicitForeignKeys(
       smallestDraw = Math.min(smallestDraw, present);
     }
 
-    if (orphans === 0) continue; // behaves like a reference and holds
+    if (orphans === 0) {
+      // Every value is there. This is the strongest thing counting can say.
+      verdict(c, present, present, true);
+      continue; // behaves like a reference and holds
+    }
 
     // How much of the unmatched set is one value repeated. Debt N33: a
     // convention and a mass of broken links produce the same `orphans`, and
@@ -886,6 +959,10 @@ export async function runImplicitForeignKeys(
         }),
         cause: 'unmatched_is_one_repeated_value',
       });
+      // A convention was set aside and nothing remained, so the reference
+      // holds. `found` counts the residual as matched, which is what setting
+      // the convention aside MEANS — and `of` keeps the honest denominator.
+      verdict(c, present, present - residual, true);
       continue;
     }
 
@@ -903,6 +980,10 @@ export async function runImplicitForeignKeys(
         }),
         cause: 'match_rate_too_low',
       });
+      // 🟥 The valuable half. The query ran, the values were counted, and the
+      // count says no. Today the map keeps the guess anyway, because nothing
+      // tells it — measured on Pagila: one disproved edge still on the map.
+      verdict(c, present, present - residual, false);
       continue;
     }
 
@@ -1108,6 +1189,10 @@ export async function runImplicitForeignKeys(
     };
 
     drafts.push(finding);
+    // The fourth and last exit. A finding means the reference is real AND has
+    // unmatched values in it — which is the most useful thing a map can carry:
+    // a relationship that holds, with the count of how well.
+    verdict(c, present, present - residual, true);
   }
 
   return {
@@ -1116,6 +1201,7 @@ export async function runImplicitForeignKeys(
     findings: sealFindings(drafts, 'layer-b'),
     candidatesConsidered: candidates.length,
     candidatesVerified: verified,
+    verdicts,
     partitionsCovered: graph.tables.filter((t) => t.isPartition).length,
     notExamined,
     ruledOut,

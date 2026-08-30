@@ -13,7 +13,7 @@ import { dirname, resolve } from 'node:path';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { modelConfig, readableDbError } from '../src/main/ask-flow.js';
+import { modelConfig, readableDbError, readerSentenceFor } from '../src/main/ask-flow.js';
 
 describe('the database refused, and a person has to read why', () => {
   it("🟥 strips the aliases this product invented, not the database's words", () => {
@@ -104,5 +104,48 @@ describe('the tier name is written twice, and the two must agree', () => {
       if (base !== undefined) process.env['AI_BASE_URL'] = base;
       if (key !== undefined) process.env['AI_API_KEY'] = key;
     }
+  });
+});
+
+describe('what the gate says, and what a person is told', () => {
+  it('🟥 never passes a field-result reference to the reader', () => {
+    // This is the sentence that reached a real screen. It names VS-7 and ends
+    // with a latency figure, and the person reading it does not understand
+    // backends and is accountable for one.
+    const gate =
+      'The choice says the database cannot answer and will not say what is ' +
+      'outside it. A refusal that names no gap is the hedging a reader ' +
+      'discounts, and VS-7 measured what discounted hedging costs. · 10745ms';
+    const said = readerSentenceFor(gate);
+    assert.equal(said.includes('VS-7'), false);
+    assert.equal(/\d+ms/.test(said), false);
+    assert.equal(said.includes('hedging'), false);
+    // And it still says the three things that matter.
+    assert.match(said, /cannot help/);
+    assert.match(said, /would not say what it would take/);
+    assert.match(said, /nothing about your data follows/);
+  });
+
+  it('tells the six refusals apart', () => {
+    // Each of `sealLookup`'s refusals leads a reader somewhere different, so
+    // one sentence for all six would be the same as no sentence.
+    const said = [
+      'names no gap',
+      'was never offered',
+      'more than once',
+      'names nothing to look at',
+      'two different answers',
+      'shape it was asked for',
+    ].map(readerSentenceFor);
+    assert.equal(new Set(said).size, 6);
+    for (const s of said) assert.match(s, /nothing about your data follows/);
+  });
+
+  it('🟥 admits it when a refusal is one it has not been taught', () => {
+    // A rule added to sealLookup and not here must produce an honest shrug,
+    // not a confident explanation of the wrong thing.
+    const said = readerSentenceFor('some rule nobody wrote a sentence for');
+    assert.match(said, /will not guess at what it meant/);
+    assert.match(said, /nothing about your data follows/);
   });
 });
