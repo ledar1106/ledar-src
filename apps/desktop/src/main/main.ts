@@ -67,6 +67,14 @@ protocol.registerSchemesAsPrivileged([
   { scheme: 'app', privileges: { standard: true, secure: true } },
 ]);
 
+// The window's icon, dev mode only. The packaged build does not need this:
+// rcedit stamps the same .ico into LEDAR.exe at pack time, and Windows takes
+// the taskbar/titlebar icon from the executable. In dev the executable is
+// electron.exe, so without this line every `npm run desktop` window wears
+// Electron's atom — which is exactly what the Licensor saw.
+const DEV_ICON =
+  LAYOUT === 'dev' ? join(REPO_ROOT, 'infra', 'pack-msix', 'assets', 'ledar.ico') : undefined;
+
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
     width: 1200,
@@ -74,6 +82,7 @@ function createWindow(): BrowserWindow {
     minWidth: 900,
     minHeight: 640,
     title: 'LEDAR',
+    ...(DEV_ICON ? { icon: DEV_ICON } : {}),
     backgroundColor: '#ffffff',
     autoHideMenuBar: true,
     webPreferences: {
